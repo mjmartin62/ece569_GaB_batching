@@ -77,8 +77,7 @@ __global__ void APP_GB(int *Decide,int *CtoV,int *Receivedword,int *Interleaver,
     n = threadIdx.x + blockIdx.x*blockDim.x;
 	numB=ColumnDegree[n] * n;
     
-//	for (n=0;n<N;n++)
-//	{
+
     if (n < N) {
 		Global=(1-2*Receivedword[n]);
 		for (t=0;t<ColumnDegree[n];t++) Global+=(-2)*CtoV[Interleaver[numB+t]]+1;
@@ -86,20 +85,21 @@ __global__ void APP_GB(int *Decide,int *CtoV,int *Receivedword,int *Interleaver,
         else if (Global<0) Decide[n]= 1;
         else  Decide[n]=Receivedword[n];
     }
-//		numB=numB+ColumnDegree[n];
-//	}
+
 }
 //#####################################################################################################
-int ComputeSyndrome(int *Decide,int **Mat,int *RowDegree,int M)
+__global__ void ComputeSyndrome(int *Decide,int *Mat,int *RowDegree,int M, int *Dev_Syndrome)
 {
 	int Synd,k,l;
+    //This needs reduction function 
+
 
 	for (k=0;k<M;k++)
 	{
 		Synd=0;
-		for (l=0;l<RowDegree[k];l++) Synd=Synd^Decide[Mat[k][l]];
+		for (l=0;l<RowDegree[k];l++)Synd=Synd^Decide[Mat[k*8 + l]]; 
 		if (Synd==1) break;
 	}
-	return(1-Synd);
+  	*Dev_Syndrome = 1-Synd;
 }
 

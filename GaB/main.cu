@@ -98,7 +98,7 @@ int main(int argc, char * argv[])
   strcpy(FileMatrix,argv[1]); 	// Matrix file
   strcpy(FileResult,argv[2]); 	// Results file
   //--------------Simulation input for GaB BF-------------------------
-  NbMonteCarlo=1000000;	    // Maximum nb of codewords sent
+  NbMonteCarlo=100000;	    // Maximum nb of codewords sent
   NbIter=200; 	            // Maximum nb of iterations
   alpha= 0.01;              // Channel probability of error
   NBframes=100;	            // Simulation stops when NBframes in error
@@ -107,7 +107,7 @@ int main(int argc, char * argv[])
     // brkunl
   alpha_max= 0.0600;		    //Channel Crossover Probability Max and Min
   alpha_min= 0.0200;
-  alpha_step=0.0100;
+  alpha_step=0.0050;
 
 
   // ----------------------------------------------------
@@ -141,7 +141,7 @@ int main(int argc, char * argv[])
 
   printf("Matrix Loaded on Host side\n");
 
-   
+   int RowDegMax = RowDegree[0];
   
 
    
@@ -202,6 +202,7 @@ int main(int argc, char * argv[])
   //Allocate VtoC, CtoV, Receivedword, Interleaver location in the device
   int *Dev_VtoC, *Dev_CtoV, *Dev_Receivedword, *Dev_Interleaver, *Dev_ColumnDegree;
   int *Dev_Decide, *Dev_RowDegree;
+  int *Dev_Mat, *Dev_Syndrome;
   if (cudaMalloc((void **) &Dev_VtoC, NbBranch * sizeof(int)) != cudaSuccess) {
   printf("malloc error for *Dev_VtoC \n");
   return 0;
@@ -230,7 +231,17 @@ int main(int argc, char * argv[])
   printf("malloc error for *Dev_Decide \n");
   return 0;
   }
+
+  if(cudaMalloc((void **) &Dev_Mat, M * RowDegMax * sizeof(int)) != cudaSuccess) {
+  printf("malloc error for *Dev_Mat \n");
+  return 0;
+  }
   
+  if(cudaMalloc((void **) &Dev_Syndrome, sizeof(int)) != cudaSuccess) {
+  printf("malloc error for *Dev_Syndrome \n");
+  return 0;
+  }
+
   //Copy interleaver to Device 
    if (cudaMemcpy(Dev_Interleaver, Interleaver, NbBranch * sizeof(int), cudaMemcpyHostToDevice) != cudaSuccess){
    printf("data transfer error from host to device on Dev_Interleaver\n");
@@ -247,6 +258,28 @@ int main(int argc, char * argv[])
    return 0;
    }
 
+   //Copy H-Matrix to Global memory 
+   for (int i = 0; i < M ; i++) {
+   if (cudaMemcpy((Dev_Mat+RowDegMax*i), *(Mat+i), RowDegMax * sizeof(int), cudaMemcpyHostToDevice) != cudaSuccess){
+   printf("data transfer error from host to device on Dev_Mat\n");
+   return 0;
+   }
+   }
+
+    //Copy matrixB to device memory
+     if (cudaMemcpy(Dev_VtoC, VtoC, NbBranch * sizeof(int), cudaMemcpyHostToDevice) != cudaSuccess){
+     printf("data transfer error from host to device on deviceB\n");
+     return 0;
+      }
+     if (cudaMemcpy(Dev_CtoV, CtoV, NbBranch * sizeof(int), cudaMemcpyHostToDevice) != cudaSuccess){
+      printf("data transfer error from host to device on deviceB\n");
+      return 0;
+     }
+      
+
+
+   
+ //  printf("\n Matrix copied ");
   // ----------------------------------------------------
   // Gaussian Elimination for the Encoding Matrix (Full Representation)
   // ----------------------------------------------------
@@ -260,20 +293,20 @@ int main(int argc, char * argv[])
   //for (m=0;m<N;m++) printf("%d\t",PermG[m]);printf("\n");
 
   // Variables for Statistics
-  int IsCodeword,nb;
+  int *IsCodeword = (int *)calloc(1, sizeof(int *)) ,nb;
   int NiterMoy,NiterMax;
   int Dmin;
   int NbTotalErrors,NbBitError;
   int NbUnDetectedErrors,NbError;
   int *energy;
   energy=(int *)calloc(N,sizeof(int));
-
+ 
   strcpy(FileName,FileResult);
   f=fopen(FileName,"w");
   fprintf(f,"-------------------------Gallager B--------------------------------------------------\n");
   fprintf(f,"alpha\t\tNbEr(BER)\t\tNbFer(FER)\t\tNbtested\t\tIterAver(Itermax)\t\tNbUndec(Dmin)\n");
 
-  printf("-------------------------Gallager B--------------------------------------------------\n");
+  printf("-------------------------Gallager B  Parallel code--------------------------------------------------\n");
   printf("alpha\t\t\tNbEr(BER)\t\tNbFer(FER)\t\tNbtested\t\tIterAver(Itermax)\t\tNbUndec(Dmin)\n");
 
   for(alpha=alpha_max;alpha>=alpha_min;alpha-=alpha_step) {
@@ -325,63 +358,38 @@ int main(int argc, char * argv[])
 	for (iter=0;iter<NbIter;iter++)
 	  {
 
-      //Copy matrixB to device memory
-     if (cudaMemcpy(Dev_VtoC, VtoC, NbBranch * sizeof(int), cudaMemcpyHostToDevice) != cudaSuccess){
-     printf("data transfer error from host to device on deviceB\n");
-     return 0;
-      }
-     if (cudaMemcpy(Dev_CtoV, CtoV, NbBranch * sizeof(int), cudaMemcpyHostToDevice) != cudaSuccess){
-      printf("data transfer error from host to device on deviceB\n");
-      return 0;
-     }
-      
-
         if(iter==0) {
           // Initialize VN to CN message
        DataPassGBIter0 <<<ceil(N/32.0), 32 >>> (Dev_VtoC, Dev_CtoV, Dev_Receivedword, Dev_Interleaver, Dev_ColumnDegree,N,NbBranch);
            }
-		    else 
+		else 
           // Update VN to CN message array
           DataPassGB <<< ceil(N/32.0), 32 >>> (Dev_VtoC, Dev_CtoV, Dev_Receivedword, Dev_Decide, Dev_Interleaver, Dev_ColumnDegree,N,NbBranch);
   
 		    cudaDeviceSynchronize();
         // Update the CN to VN message array
         CheckPassGB<<< ceil(M/32.0), 32 >>> (Dev_CtoV, Dev_VtoC, M,NbBranch,Dev_RowDegree);
- //       if (cudaMemcpy(VtoC, Dev_VtoC, NbBranch * sizeof(int), cudaMemcpyDeviceToHost) != cudaSuccess){
- //    printf("data transfer error from device to host on V to C\n");
- //    return 0;
- //    }
- //            if (cudaMemcpy(CtoV, Dev_CtoV, NbBranch * sizeof(int), cudaMemcpyDeviceToHost) != cudaSuccess){
- //    printf("data transfer error from device to host on C to V\n");
- //    return 0;
- //    }
-
- 
-
+        cudaDeviceSynchronize();
         //  Update the VN's (VN's are stored in the Decide array)
         APP_GB  <<<ceil(N/32.0), 32>>> (Dev_Decide, Dev_CtoV, Dev_Receivedword, Dev_Interleaver, Dev_ColumnDegree, N,M, NbBranch);
-          cudaDeviceSynchronize();
-         if (cudaMemcpy(VtoC, Dev_VtoC, NbBranch * sizeof(int), cudaMemcpyDeviceToHost) != cudaSuccess){
-         printf("data transfer error from device to host on V to C\n");
+         cudaDeviceSynchronize();
+         if (cudaMemcpy(Decide, Dev_Decide, N * sizeof(int), cudaMemcpyDeviceToHost) != cudaSuccess){
+         printf("data transfer error from device to host on Dev Decide\n");
          return 0;
          }
-         if (cudaMemcpy(CtoV, Dev_CtoV, NbBranch * sizeof(int), cudaMemcpyDeviceToHost) != cudaSuccess){
-         printf("data transfer error from device to host on C to V\n");
-         return 0;
-     }
-
-     if (cudaMemcpy(Decide, Dev_Decide, N * sizeof(int), cudaMemcpyDeviceToHost) != cudaSuccess){
-     printf("data transfer error from device to host on C to V\n");
-      return 0;
-     }
           cudaDeviceSynchronize();
-
-
-
-        
+       
         // Check to see if updated codeword has been recovered
-        IsCodeword = ComputeSyndrome(Decide,Mat,RowDegree,M);
-        if (IsCodeword) 
+         ComputeSyndrome <<<1, 1>>>(Dev_Decide, Dev_Mat, Dev_RowDegree, M, Dev_Syndrome);
+         if (cudaMemcpy(IsCodeword, Dev_Syndrome,  sizeof(int), cudaMemcpyDeviceToHost) != cudaSuccess){
+         printf("data transfer error from device to Dev Syndrome\n");
+         return 0;
+          }
+          cudaDeviceSynchronize();
+  
+   
+     
+        if (*IsCodeword) 
           break;
 	  }
 	//============================================================================
@@ -391,15 +399,15 @@ int main(int argc, char * argv[])
 	  NbError=0;for (k=0;k<N;k++)  if (Decide[k]!=Codeword[k]) NbError++;
 	  NbBitError=NbBitError+NbError;
 	// Case Divergence
-	  if (!IsCodeword)
+	  if (!(*IsCodeword))
 	  {
 		  NiterMoy=NiterMoy+NbIter;
 		  NbTotalErrors++;
 	  }
 	// Case Convergence to Right Codeword
-	  if ((IsCodeword)&&(NbError==0)) { NiterMax=max(NiterMax,iter+1); NiterMoy=NiterMoy+(iter+1); }
+	  if ((*IsCodeword)&&(NbError==0)) { NiterMax=max(NiterMax,iter+1); NiterMoy=NiterMoy+(iter+1); }
 	// Case Convergence to Wrong Codeword
-	  if ((IsCodeword)&&(NbError!=0))
+	  if ((*IsCodeword)&&(NbError!=0))
 	  {
 		  NiterMax=max(NiterMax,iter+1); NiterMoy=NiterMoy+(iter+1);
 		  NbTotalErrors++; NbUnDetectedErrors++;
