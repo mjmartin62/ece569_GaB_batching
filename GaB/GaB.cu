@@ -18,29 +18,35 @@
 #include <unistd.h>
 
 //#####################################################################################################
-__global__ void DataPassGB(int *VtoC,int *CtoV,int *Receivedword,int *InterResult,int *Interleaver,int *ColumnDegree,int N,int NbBranch)
+__global__ void DataPassGB(int *VtoC, int *CtoV, int *Receivedword, int *Interleaver,int *ColumnDegree,int N,int NbBranch, int iter)
 {
 	int t,numB,n,buf;
 	int Global;
 	numB=0;
-	//for (n=0;n<N;n++)
-	//{
+	
         n = threadIdx.x + blockIdx.x*blockDim.x;
         numB = ColumnDegree[n] * n;
-		//Global=(Amplitude)*(1-2*ReceivedSymbol[n]);
-		Global=(1-2*Receivedword[n]); 
-		//Global=(1-2*(Decide[n] + Receivedword[n])); //Decide[n]^Receivedword[n];
-		for (t=0;t<ColumnDegree[n];t++) Global+=(-2)*CtoV[Interleaver[numB+t]]+1;
+    if (n < N) {
+        if (iter == 0) {
+              for (t=0;t<ColumnDegree[n];t++)     
+               VtoC[Interleaver[numB+t]]=Receivedword[n];
+        } else {
+        
+		       //Global=(Amplitude)*(1-2*ReceivedSymbol[n]);
+		       Global=(1-2*Receivedword[n]); 
+		       //Global=(1-2*(Decide[n] + Receivedword[n])); //Decide[n]^Receivedword[n];
+		       for (t=0;t<ColumnDegree[n];t++) Global+=(-2)*CtoV[Interleaver[numB+t]]+1;
 
-		for (t=0;t<ColumnDegree[n];t++)
-		{
-		  buf=Global-((-2)*CtoV[Interleaver[numB+t]]+1);
-		  if (buf<0)  VtoC[Interleaver[numB+t]]= 1; //else VtoC[Interleaver[numB+t]]= 1;
-		  else if (buf>0) VtoC[Interleaver[numB+t]]= 0; //else VtoC[Interleaver[numB+t]]= 1;
-		  else  VtoC[Interleaver[numB+t]]=Receivedword[n];
-		}
-		numB=numB+ColumnDegree[n];
-	//}
+		       for (t=0;t<ColumnDegree[n];t++)
+		       {
+		            buf=Global-((-2)*CtoV[Interleaver[numB+t]]+1);
+		            if (buf<0)  VtoC[Interleaver[numB+t]]= 1; //else VtoC[Interleaver[numB+t]]= 1;
+		            else if (buf>0) VtoC[Interleaver[numB+t]]= 0; //else VtoC[Interleaver[numB+t]]= 1;
+		            else  VtoC[Interleaver[numB+t]]=Receivedword[n];
+		        }
+           }
+     }
+	
 }
 //#####################################################################################################
 //#####################################################################################################
@@ -92,14 +98,25 @@ __global__ void ComputeSyndrome(int *Decide,int *Mat,int *RowDegree,int M, int *
 {
 	int Synd,k,l;
     //This needs reduction function 
+    __shared__ int sh_Synd[648];
+    
+     int n = threadIdx.x + blockIdx.x*blockDim.x;
+     int thd_id = threadIdx.x;
 
+     if(n ==0 ) *Dev_Syndrome = 1;
+     
+     for (l=0;l<RowDegree[n];l++)Synd=Synd^Decide[Mat[n*8 + l]];    
 
-	for (k=0;k<M;k++)
-	{
-		Synd=0;
-		for (l=0;l<RowDegree[k];l++)Synd=Synd^Decide[Mat[k*8 + l]]; 
-		if (Synd==1) break;
-	}
-  	*Dev_Syndrome = 1-Synd;
+     if (n < M) sh_Synd[thd_id] = Synd; 
+     __syncthreads();
+     
+    //Reduce to a single value 
+    for(int stride = blockDim.x/2 ; stride > 0; stride = stride/2) {
+     sh_Synd[thd_id] = sh_Synd[thd_id] | sh_Synd[thd_id + stride];
+     __syncthreads();
+     }
+    
+     if (thd_id == 0 ) atomicMin(Dev_Syndrome, (1 - sh_Synd[0])); 
+
 }
 

@@ -105,9 +105,9 @@ int main(int argc, char * argv[])
   Graine=1;		            // Seed Initialization for Multiple Simulations
 
     // brkunl
-  alpha_max= 0.0600;		    //Channel Crossover Probability Max and Min
-  alpha_min= 0.0200;
-  alpha_step=0.0050;
+  alpha_max= 0.060;		    //Channel Crossover Probability Max and Min
+  alpha_min= 0.020;
+  alpha_step=0.010;
 
 
   // ----------------------------------------------------
@@ -343,11 +343,7 @@ int main(int argc, char * argv[])
     CtoV[k]=0;
   }
 
-  // Initialize the VN nodes to the received corrupted word (VN's are stored in the Decide array)
-	for (k=0;k<N;k++) 
-    Decide[k]=Receivedword[k];
-
-      
+ 
 
 
        if (cudaMemcpy(Dev_Receivedword, Receivedword, N * sizeof(int), cudaMemcpyHostToDevice) != cudaSuccess){
@@ -358,40 +354,36 @@ int main(int argc, char * argv[])
 	for (iter=0;iter<NbIter;iter++)
 	  {
 
-        if(iter==0) {
-          // Initialize VN to CN message
-       DataPassGBIter0 <<<ceil(N/32.0), 32 >>> (Dev_VtoC, Dev_CtoV, Dev_Receivedword, Dev_Interleaver, Dev_ColumnDegree,N,NbBranch);
-           }
-		else 
           // Update VN to CN message array
-          DataPassGB <<< ceil(N/32.0), 32 >>> (Dev_VtoC, Dev_CtoV, Dev_Receivedword, Dev_Decide, Dev_Interleaver, Dev_ColumnDegree,N,NbBranch);
-  
-		    cudaDeviceSynchronize();
+        DataPassGB <<< ceil(N/32.0), 32 >>> (Dev_VtoC, Dev_CtoV, Dev_Receivedword, Dev_Interleaver, Dev_ColumnDegree,N,NbBranch, iter);  cudaDeviceSynchronize();
+
         // Update the CN to VN message array
-        CheckPassGB<<< ceil(M/32.0), 32 >>> (Dev_CtoV, Dev_VtoC, M,NbBranch,Dev_RowDegree);
-        cudaDeviceSynchronize();
+        CheckPassGB<<< ceil(M/32.0), 32 >>> (Dev_CtoV, Dev_VtoC, M,NbBranch,Dev_RowDegree); cudaDeviceSynchronize();
+
         //  Update the VN's (VN's are stored in the Decide array)
-        APP_GB  <<<ceil(N/32.0), 32>>> (Dev_Decide, Dev_CtoV, Dev_Receivedword, Dev_Interleaver, Dev_ColumnDegree, N,M, NbBranch);
-         cudaDeviceSynchronize();
-         if (cudaMemcpy(Decide, Dev_Decide, N * sizeof(int), cudaMemcpyDeviceToHost) != cudaSuccess){
-         printf("data transfer error from device to host on Dev Decide\n");
-         return 0;
-         }
-          cudaDeviceSynchronize();
-       
+        APP_GB  <<<ceil(N/32.0), 32>>> (Dev_Decide, Dev_CtoV, Dev_Receivedword, Dev_Interleaver, Dev_ColumnDegree, N,M, NbBranch); cudaDeviceSynchronize();
+  
         // Check to see if updated codeword has been recovered
-         ComputeSyndrome <<<1, 1>>>(Dev_Decide, Dev_Mat, Dev_RowDegree, M, Dev_Syndrome);
+        ComputeSyndrome <<<ceil(M/32.0), 32>>>(Dev_Decide, Dev_Mat, Dev_RowDegree, M, Dev_Syndrome); cudaDeviceSynchronize();
+
          if (cudaMemcpy(IsCodeword, Dev_Syndrome,  sizeof(int), cudaMemcpyDeviceToHost) != cudaSuccess){
          printf("data transfer error from device to Dev Syndrome\n");
          return 0;
           }
           cudaDeviceSynchronize();
   
-   
+         //printf(" \n ISCodeword is : %d \n", *IsCodeword);
      
         if (*IsCodeword) 
           break;
 	  }
+
+        if (cudaMemcpy(Decide, Dev_Decide, N * sizeof(int), cudaMemcpyDeviceToHost) != cudaSuccess){
+         printf("data transfer error from device to host on Dev Decide\n");
+         return 0;
+         }
+          cudaDeviceSynchronize();
+
 	//============================================================================
   	// Compute Statistics
 	//============================================================================
