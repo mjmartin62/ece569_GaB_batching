@@ -104,10 +104,19 @@ int main(int argc, char * argv[])
   NBframes=100;	            // Simulation stops when NBframes in error
   Graine=1;		            // Seed Initialization for Multiple Simulations
 
-    // brkunl
-  alpha_max= 0.060;		    //Channel Crossover Probability Max and Min
-  alpha_min= 0.020;
-  alpha_step=0.010;
+  // brkunl
+  alpha_max= 0.0600;		    //Channel Crossover Probability Max and Min
+  alpha_min= 0.0400;
+  alpha_step=0.0100;
+
+  // Overrides for verification runs
+  /*
+  alpha= 0.04; 
+  alpha_max = 0.04;
+  alpha_min = 0.04;
+  alpha_step = 0.04;
+  NbMonteCarlo=10;
+  */
 
 
   // ----------------------------------------------------
@@ -309,50 +318,44 @@ int main(int argc, char * argv[])
   printf("-------------------------Gallager B  Parallel code--------------------------------------------------\n");
   printf("alpha\t\t\tNbEr(BER)\t\tNbFer(FER)\t\tNbtested\t\tIterAver(Itermax)\t\tNbUndec(Dmin)\n");
 
+  // Loop for different error rates
   for(alpha=alpha_max;alpha>=alpha_min;alpha-=alpha_step) {
+    NiterMoy=0;NiterMax=0;
+    Dmin=1e5;
+    NbTotalErrors=0;NbBitError=0;
+    NbUnDetectedErrors=0;NbError=0;
 
-  NiterMoy=0;NiterMax=0;
-  Dmin=1e5;
-  NbTotalErrors=0;NbBitError=0;
-  NbUnDetectedErrors=0;NbError=0;
-
-  //--------------------------------------------------------------
-  // Main loop for max number of codeword simulations
-  for (nb=0,nbtestedframes=0;nb<NbMonteCarlo;nb++)
-  {
-    //encoding
-    for (k=0;k<rank;k++) U[k]=0;
-	for (k=rank;k<N;k++) U[k]=floor(drand48()*2);
-	for (k=rank-1;k>=0;k--) { for (l=k+1;l<N;l++) U[k]=U[k]^(MatG[k][l]*U[l]); }
-	for (k=0;k<N;k++) Codeword[PermG[k]]=U[k];
-	// All zero codeword
-	//for (n=0;n<N;n++) { Codeword[n]=0; }
-
-    // Add Noise and send possibly corrupted Codeword to Receivedword
-    for (n=0;n<N;n++)  
-      if (drand48()<alpha) 
-        Receivedword[n]=1-Codeword[n]; 
-      else 
-        Receivedword[n]=Codeword[n];
-
-	//============================================================================
- 	// Decoder
-	//============================================================================
-	// Initialize the CN to VN message array to 0
-  for (k=0; k<NbBranch; k++) {
-    CtoV[k]=0;
-  }
-
- 
+    //--------------------------------------------------------------
+    // Main loop for max number of codeword simulations
+    for (nb=0,nbtestedframes=0;nb<NbMonteCarlo;nb++) {
+      //encoding
+      for (k=0;k<rank;k++) U[k]=0;
+	    for (k=rank;k<N;k++) U[k]=floor(drand48()*2);
+	    for (k=rank-1;k>=0;k--) { for (l=k+1;l<N;l++) U[k]=U[k]^(MatG[k][l]*U[l]); }
+	    for (k=0;k<N;k++) Codeword[PermG[k]]=U[k];
 
 
-       if (cudaMemcpy(Dev_Receivedword, Receivedword, N * sizeof(int), cudaMemcpyHostToDevice) != cudaSuccess){
-      printf("data transfer error from host to device on deviceB\n");
-      return 0;
-     }
-  // Outer loop to limit (max of 100) the number of VN node updates thru parity checks
-	for (iter=0;iter<NbIter;iter++)
-	  {
+      // Add Noise and send possibly corrupted Codeword to Receivedword
+      for (n=0;n<N;n++)  
+        if (drand48()<alpha) 
+          Receivedword[n]=1-Codeword[n]; 
+        else 
+          Receivedword[n]=Codeword[n];
+
+	    //============================================================================
+ 	    // Decoder
+	    //============================================================================
+	    // Initialize the CN to VN message array to 0
+      for (k=0; k<NbBranch; k++) {
+        CtoV[k]=0; }
+
+      if (cudaMemcpy(Dev_Receivedword, Receivedword, N * sizeof(int), cudaMemcpyHostToDevice) != cudaSuccess){
+        printf("data transfer error from host to device on deviceB\n");
+        return 0;
+        }
+
+      // Outer loop to limit (max of 100) the number of VN node updates thru parity checks
+	    for (iter=0;iter<NbIter;iter++) {
 
           // Update VN to CN message array
         DataPassGB <<< ceil(N/32.0), 32 >>> (Dev_VtoC, Dev_CtoV, Dev_Receivedword, Dev_Interleaver, Dev_ColumnDegree,N,NbBranch, iter);  cudaDeviceSynchronize();
@@ -374,40 +377,72 @@ int main(int argc, char * argv[])
   
          //printf(" \n ISCodeword is : %d \n", *IsCodeword);
      
-        if (*IsCodeword) 
-          break;
-	  }
+          if (*IsCodeword) 
+            break;
+	    }
 
-        if (cudaMemcpy(Decide, Dev_Decide, N * sizeof(int), cudaMemcpyDeviceToHost) != cudaSuccess){
+      // Copy decoded codeword back to host
+      if (cudaMemcpy(Decide, Dev_Decide, N * sizeof(int), cudaMemcpyDeviceToHost) != cudaSuccess){
          printf("data transfer error from device to host on Dev Decide\n");
          return 0;
          }
-          cudaDeviceSynchronize();
+          
+      cudaDeviceSynchronize();
 
-	//============================================================================
-  	// Compute Statistics
-	//============================================================================
+      //============================================================================
+  	  // Verification:  Uncomment for short runs
+	    //============================================================================
+      /*
+      // Output uncorrupted codewords to file for verification purposes
+      FILE *fptr1;
+      fptr1 = (fopen("codewords_test_verification_pre_corrupt_02.txt", "a+"));
+      // send codeword to output file
+      for (k=0;k<N;k++) 
+        fprintf(fptr1, "%u %s", Codeword[k], "");
+      fprintf(fptr1, "%s", "\n");
+      fclose(fptr1);
+            
+      // Output decoded codewords to file for verification purposes
+      FILE *fptr2;
+      fptr2 = (fopen("codewords_test_verification_decoded_02.txt", "a+"));
+      // send codeword to output file
+      for (k=0;k<N;k++) 
+        fprintf(fptr2, "%u %s", Decide[k], "");
+      fprintf(fptr2, "%s", "\n");
+      fclose(fptr2);
+
+      // Print out number of iterations decoder took
+      printf("Number of decoder iterations: ");
+      printf("%6d|\n", iter);
+      */
+            
+
+	    //============================================================================
+  	  // Compute Statistics
+	    //============================================================================
       nbtestedframes++;
-	  NbError=0;for (k=0;k<N;k++)  if (Decide[k]!=Codeword[k]) NbError++;
-	  NbBitError=NbBitError+NbError;
-	// Case Divergence
-	  if (!(*IsCodeword))
-	  {
-		  NiterMoy=NiterMoy+NbIter;
-		  NbTotalErrors++;
-	  }
-	// Case Convergence to Right Codeword
-	  if ((*IsCodeword)&&(NbError==0)) { NiterMax=max(NiterMax,iter+1); NiterMoy=NiterMoy+(iter+1); }
-	// Case Convergence to Wrong Codeword
-	  if ((*IsCodeword)&&(NbError!=0))
-	  {
-		  NiterMax=max(NiterMax,iter+1); NiterMoy=NiterMoy+(iter+1);
-		  NbTotalErrors++; NbUnDetectedErrors++;
-		  Dmin=min(Dmin,NbError);
-	  }
-	// Stopping Criterion
-	 if (NbTotalErrors==NBframes) break;
-  }
+	    NbError=0;for (k=0;k<N;k++)  if (Decide[k]!=Codeword[k]) NbError++;
+	    NbBitError=NbBitError+NbError;
+	    // Case Divergence
+	    if (!(*IsCodeword)) {
+		    NiterMoy=NiterMoy+NbIter;
+		    NbTotalErrors++;
+	    }
+
+	    // Case Convergence to Right Codeword
+	    if ((*IsCodeword)&&(NbError==0)) { NiterMax=max(NiterMax,iter+1); NiterMoy=NiterMoy+(iter+1); }
+	      // Case Convergence to Wrong Codeword
+	      if ((*IsCodeword)&&(NbError!=0)) {
+		      NiterMax=max(NiterMax,iter+1); NiterMoy=NiterMoy+(iter+1);
+		      NbTotalErrors++; NbUnDetectedErrors++;
+		      Dmin=min(Dmin,NbError);
+	      }
+	
+      // Stopping Criterion
+	    if (NbTotalErrors==NBframes) break;
+    }
+
+    // Print final statistics
     printf("%1.5f\t\t",alpha);
     printf("%10d (%1.16f)\t\t",NbBitError,(float)NbBitError/N/nbtestedframes);
     printf("%4d (%1.16f)\t\t",NbTotalErrors,(float)NbTotalErrors/nbtestedframes);
@@ -421,9 +456,9 @@ int main(int argc, char * argv[])
     fprintf(f,"%10d\t\t",nbtestedframes);
     fprintf(f,"%1.2f(%d)\t\t",(float)NiterMoy/nbtestedframes,NiterMax);
     fprintf(f,"%d(%d)\n",NbUnDetectedErrors,Dmin);
-}
-  fclose(f);
-  return(0);
-}
+  }
 
 
+    fclose(f);
+    return(0);
+}
