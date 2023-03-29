@@ -26,6 +26,22 @@
 #define BPSK(x) (1-2*(x))
 #define PI 3.1415926536
 
+//#####################################################################################################
+int VerificationComputeSyndrome(int *Decide,int **Mat,int *RowDegree,int M)
+{
+	int Synd,k,l;
+
+	for (k=0;k<M;k++)
+	{
+		Synd=0;
+		for (l=0;l<RowDegree[k];l++) Synd=Synd^Decide[Mat[k][l]];
+		if (Synd==1) {
+      printf("GPU Decoder failed decode process \n");
+      break;
+    }
+	}
+	return(1-Synd);
+}
 
 //#####################################################################################################
 int GaussianElimination_MRB(int *Perm,int **MatOut,int **Mat,int M,int N)
@@ -152,11 +168,6 @@ int main(int argc, char * argv[])
 
    int RowDegMax = RowDegree[0];
   
-
-   
-    
-
-
   // ----------------------------------------------------
   // Build Graph
   // ----------------------------------------------------
@@ -335,7 +346,7 @@ int main(int argc, char * argv[])
 	    for (k=0;k<N;k++) Codeword[PermG[k]]=U[k];
 
 
-      // Add Noise and send possibly corrupted Codeword to Receivedword
+      // Add Noise and assign possibly corrupted Codeword to Receivedword
       for (n=0;n<N;n++)  
         if (drand48()<alpha) 
           Receivedword[n]=1-Codeword[n]; 
@@ -414,8 +425,11 @@ int main(int argc, char * argv[])
       // Print out number of iterations decoder took
       printf("Number of decoder iterations: ");
       printf("%6d|\n", iter);
+
+      // Run H*CW syndrome check
+      VerificationComputeSyndrome(Decide,Mat,RowDegree,M);
       */
-            
+
 
 	    //============================================================================
   	  // Compute Statistics
