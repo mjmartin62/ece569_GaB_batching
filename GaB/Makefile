@@ -55,7 +55,7 @@ INC_DIR = ~$(USER)/ece569/proj/source/GaB
 EXE = run_test
 
 # Object files:
-OBJS = $(OBJ_DIR)/main.o
+OBJS = $(OBJ_DIR)/main
 
 
 ##########################################################
@@ -72,9 +72,11 @@ $(EXE) : $(OBJS)
 #	$(CC) $(CC_FLAGS) -c $< -o $@
 
 # Compile C++ source files to object files:
-$(OBJ_DIR)/%.o : $(SRC_DIR)/main.cu 
+$(OBJ_DIR)/% : $(SRC_DIR)/main.cu 
 	$(NVCC)  $<  $(SRC_DIR)/GaB.cu $(NVCC_FLAGS) -o $@ -I=$(INC_DIR) 
 
+
+#	$(NVCC)  $<  $(SRC_DIR)/GaB.cu $(NVCC_FLAGS) -o run_test 
 # Compile CUDA source files to object files:
 #$(OBJ_DIR)/%.o : $(SRC_DIR)/%.cu $(INC_DIR)/%.cuh
 #$(OBJ_DIR)/%.o : $(SRC_DIR)/GaB.cu 
@@ -82,5 +84,4 @@ $(OBJ_DIR)/%.o : $(SRC_DIR)/main.cu
 
 # Clean objects in object directory.
 clean:
-	$(RM) bin/* *.o $(EXE)
-
+	$(RM) bin/* $(EXE)
