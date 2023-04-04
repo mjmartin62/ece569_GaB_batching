@@ -181,15 +181,15 @@ int main(int argc, char * argv[])
   alpha_min= 0.0400;
   alpha_step=0.0100;
   
+  // ----------------------------------------------------
   // Overrides for verification and testing runs
-  alpha= 0.04; 
-  alpha_max = 0.04;
-  alpha_min = 0.04;
-  alpha_step = 0.04;
+  // ----------------------------------------------------
+  alpha= 0.00001; 
+  alpha_max = 0.00001;
+  alpha_min = 0.00001;
+  alpha_step = 0.00001;
   NbMonteCarlo=40;
   
-
-
   // ----------------------------------------------------
   // Load Matrix
   // ----------------------------------------------------
@@ -260,7 +260,7 @@ int main(int argc, char * argv[])
 
 
   // ----------------------------------------------------
-  // Decoder variables and memory allocation
+  // Decoder variables and Host memory allocation
   // ----------------------------------------------------
   int *CtoV,*VtoC,**Codeword,**Receivedword,**Decide,*U,l,kk;
   int iter,numB;
@@ -284,83 +284,6 @@ int main(int argc, char * argv[])
   srand48(time(0)+Graine*31+113);
 
 
-  //Allocate VtoC, CtoV, Receivedword, Interleaver location in the device
-  int *Dev_VtoC, *Dev_CtoV, *Dev_Receivedword, *Dev_Interleaver, *Dev_ColumnDegree;
-  int *Dev_Decide, *Dev_RowDegree;
-  int *Dev_Mat, *Dev_Syndrome;
-  if (cudaMalloc((void **) &Dev_VtoC, NbBranch * sizeof(int)) != cudaSuccess) {
-    printf("malloc error for *Dev_VtoC \n");
-    return 0;
-  }
-  if (cudaMalloc((void **) &Dev_CtoV, NbBranch * sizeof(int)) != cudaSuccess) {
-    printf("malloc error for *Dev_CtoV \n");
-    return 0;
-  }
-  if (cudaMalloc((void **) &Dev_Receivedword, N * sizeof(int)) != cudaSuccess) {
-    printf("malloc error for *Dev_Receivedword \n");
-    return 0;
-  }
-  if (cudaMalloc((void **) &Dev_Interleaver, NbBranch * sizeof(int)) != cudaSuccess) {
-    printf("malloc error for *Dev_Interleaver \n");
-    return 0;
-  }
-  if (cudaMalloc((void **) &Dev_ColumnDegree, N * sizeof(int)) != cudaSuccess) {
-    printf("malloc error for *Dev_Interleaver \n");
-    return 0;
-  }
-  if (cudaMalloc((void **) &Dev_RowDegree, M * sizeof(int)) != cudaSuccess) {
-    printf("malloc error for *Dev_RowDegree \n");
-    return 0;
-  }
-  if (cudaMalloc((void **) &Dev_Decide, N * sizeof(int)) != cudaSuccess) {
-    printf("malloc error for *Dev_Decide \n");
-    return 0;
-  }
-
-  if(cudaMalloc((void **) &Dev_Mat, M * RowDegMax * sizeof(int)) != cudaSuccess) {
-    printf("malloc error for *Dev_Mat \n");
-    return 0;
-  }
-  
-  if(cudaMalloc((void **) &Dev_Syndrome, sizeof(int)) != cudaSuccess) {
-    printf("malloc error for *Dev_Syndrome \n");
-    return 0;
-  }
-
-  //Copy interleaver to Device 
-  if (cudaMemcpy(Dev_Interleaver, Interleaver, NbBranch * sizeof(int), cudaMemcpyHostToDevice) != cudaSuccess){
-    printf("data transfer error from host to device on Dev_Interleaver\n");
-    return 0;
-  }
-  //Copy column degree and row degree to Device 
-  if (cudaMemcpy(Dev_ColumnDegree, ColumnDegree, N * sizeof(int), cudaMemcpyHostToDevice) != cudaSuccess){
-    printf("data transfer error from host to device on Dev_Interleaver\n");
-    return 0;
-  }
-  if (cudaMemcpy(Dev_RowDegree, RowDegree, M * sizeof(int), cudaMemcpyHostToDevice) != cudaSuccess){
-    printf("data transfer error from host to device on Dev_Interleaver\n");
-    return 0;
-  }
-
-  //Copy H-Matrix to Global memory 
-  for (int i = 0; i < M ; i++) {
-    if (cudaMemcpy((Dev_Mat+RowDegMax*i), *(Mat+i), RowDegMax * sizeof(int), cudaMemcpyHostToDevice) != cudaSuccess){
-    printf("data transfer error from host to device on Dev_Mat\n");
-    return 0;
-    }
-  }
-
-  //Copy VtoC and CtoV message arrays to device memory
-  if (cudaMemcpy(Dev_VtoC, VtoC, NbBranch * sizeof(int), cudaMemcpyHostToDevice) != cudaSuccess){
-    printf("data transfer error from host to device on deviceB\n");
-    return 0;
-  }
-  if (cudaMemcpy(Dev_CtoV, CtoV, NbBranch * sizeof(int), cudaMemcpyHostToDevice) != cudaSuccess){
-    printf("data transfer error from host to device on deviceB\n");
-    return 0;
-  }
-      
-
   // ----------------------------------------------------
   // Gaussian Elimination for the Encoding Matrix (Full Representation)
   // ----------------------------------------------------
@@ -381,7 +304,7 @@ int main(int argc, char * argv[])
   int NbUnDetectedErrors,NbError;
   int *energy;
   energy=(int *)calloc(N,sizeof(int));
- 
+
   strcpy(FileName,FileResult);
   f=fopen(FileName,"w");
   /*
@@ -392,14 +315,108 @@ int main(int argc, char * argv[])
   printf("alpha\t\t\tNbEr(BER)\t\tNbFer(FER)\t\tNbtested\t\tIterAver(Itermax)\t\tNbUndec(Dmin)\n");
   */
 
+  // ----------------------------------------------------
+  // Constant Device Memory allocations
+  // ----------------------------------------------------
+  int *Dev_ColumnDegree, *Dev_RowDegree, *Dev_Interleaver, *Dev_Mat;
+
+  if (cudaMalloc((void **) &Dev_Interleaver, NbBranch * sizeof(int)) != cudaSuccess) {
+    printf("malloc error for *Dev_Interleaver \n");
+    return 0;
+  }
+  if (cudaMalloc((void **) &Dev_ColumnDegree, N * sizeof(int)) != cudaSuccess) {
+    printf("malloc error for *Dev_Interleaver \n");
+    return 0;
+  }
+  if (cudaMalloc((void **) &Dev_RowDegree, M * sizeof(int)) != cudaSuccess) {
+    printf("malloc error for *Dev_RowDegree \n");
+    return 0;
+  }
+  if(cudaMalloc((void **) &Dev_Mat, M * RowDegMax * sizeof(int)) != cudaSuccess) {
+    printf("malloc error for *Dev_Mat \n");
+    return 0;
+  }
+  
+  // ----------------------------------------------------
+  // Constant Device Memory Transfers
+  // ----------------------------------------------------
+  //Copy interleaver to Device 
+  if (cudaMemcpy(Dev_Interleaver, Interleaver, NbBranch * sizeof(int), cudaMemcpyHostToDevice) != cudaSuccess){
+    printf("data transfer error from host to device on Dev_Interleaver\n");
+    return 0;
+  }
+  //Copy column degree and row degree to Device 
+  if (cudaMemcpy(Dev_ColumnDegree, ColumnDegree, N * sizeof(int), cudaMemcpyHostToDevice) != cudaSuccess){
+    printf("data transfer error from host to device on Dev_Interleaver\n");
+    return 0;
+  }
+  if (cudaMemcpy(Dev_RowDegree, RowDegree, M * sizeof(int), cudaMemcpyHostToDevice) != cudaSuccess){
+    printf("data transfer error from host to device on Dev_Interleaver\n");
+    return 0;
+  }
+  //Copy H-Matrix to Global memory 
+  for (int i = 0; i < M ; i++) {
+    if (cudaMemcpy((Dev_Mat+RowDegMax*i), *(Mat+i), RowDegMax * sizeof(int), cudaMemcpyHostToDevice) != cudaSuccess){
+    printf("data transfer error from host to device on Dev_Mat\n");
+    return 0;
+    }
+  }
+
+
+
+  // ----------------------------------------------------
+  // Stream based Device Memory allocations
+  // ----------------------------------------------------
+  // Declare stream sizes
+  int stream_count = Batch_size;
+  
+  // Declare stream based device memory pointers
+  // Definitions:
+  // Dev_Receivedword is corrupted word
+  // Dev_Decide is decoded word after decoder iteration(s)
+  // Dev_Syndrome is the result to check if H*CW is valid
+  // Dev_VtoC is the VN to CN message array
+  // DEV_CtoV is the CN to VN message array
+  int *Dev_Receivedword[stream_count], *Dev_Decide[stream_count], *Dev_Syndrome[stream_count];
+  int *Dev_VtoC[stream_count], *Dev_CtoV[stream_count];
+
+  // Allocate memory on the GPU for each stream
+  for (int m=0; m<stream_count; m++) {
+    cudaMalloc((void **) &Dev_Receivedword[m], N * sizeof(int));
+    cudaMalloc((void **) &Dev_Decide[m], N * sizeof(int));
+    cudaMalloc((void **) &Dev_Syndrome[m], sizeof(int));
+    cudaMalloc((void **) &Dev_VtoC[m], NbBranch * sizeof(int));
+    cudaMalloc((void **) &Dev_CtoV[m], NbBranch * sizeof(int));
+  }
+  
+
+
+
+
+
+
+
+  //Copy VtoC and CtoV message arrays to device memory
+  if (cudaMemcpy(Dev_VtoC, VtoC, NbBranch * sizeof(int), cudaMemcpyHostToDevice) != cudaSuccess){
+    printf("data transfer error from host to device on deviceB\n");
+    return 0;
+  }
+  if (cudaMemcpy(Dev_CtoV, CtoV, NbBranch * sizeof(int), cudaMemcpyHostToDevice) != cudaSuccess){
+    printf("data transfer error from host to device on deviceB\n");
+    return 0;
+  }
+      
+
+
+ 
+
+
   // Loop for different channel bit error rates
   for(alpha=alpha_max;alpha>=alpha_min;alpha-=alpha_step) {
     NiterMoy=0;NiterMax=0;
     Dmin=1e5;
     NbTotalErrors=0;NbBitError=0;
     NbUnDetectedErrors=0;NbError=0;
-
-  
 
 
     //--------------------------------------------------------------
@@ -409,63 +426,92 @@ int main(int argc, char * argv[])
       // Fill codeword pseudo buffer
       CodewordBatchGenerator(Codeword, Receivedword, MatG, PermG, alpha, rank, N, U, Batch_size);
 
-	    //============================================================================
- 	    // Decoder
-	    //============================================================================
-	    // Initialize the CN to VN message array to 0
-      //for (k=0; k<NbBranch; k++) {
-      //  CtoV[k]=0; }
+      // Initialize stream state array (1 = not complete, 0 = complete)
+      // and batch state detector
+      int stream_state[Batch_size];
+      for (int state=0; state<Batch_size; state++){
+        stream_state[state] = 1;
+      }
+      int batch_state = 1;
 
-        // Temporary outloop to process single codeword at time to verify batching is working 
-        for (int bidx = 0; bidx < Batch_size; bidx++){
+      // Declare and invoke streams
+      cudaStream_t stream[stream_count];
+      for (int m=0; m<stream_count; m++) {
+        cudaStreamCreate(&stream[m]);
+      }
 
-          if (cudaMemcpy(Dev_Receivedword, Receivedword[bidx], N * sizeof(int), cudaMemcpyHostToDevice) != cudaSuccess){
-            printf("data transfer error from host to device on deviceB\n");
-            return 0;
-            }
+      // Assign host side pinned memory where each word will be assigned to a stream
+      for (int m=0; m<stream_count; m++) {
+        cudaHostAlloc((void**)&Receivedword[m], N * sizeof(int), cudaHostAllocDefault);
+      }
 
-          // Outer loop to limit (max of 100) the number of VN node updates thru parity checks
-          for (iter=0;iter<NbIter;iter++) {
+      // Stream corrupted codeword from pinned host memory to device
+      for (int m=1; m<stream_count; m++) {
+        cudaMemcpyAsync(Dev_Receivedword[m], Receivedword[m], N * sizeof(int), cudaMemcpyHostToDevice, stream[m]);
+      }
 
-            // Update VN to CN message array
-            DataPassGB <<< ceil(N/32.0), 32 >>> (Dev_VtoC, Dev_CtoV, Dev_Receivedword, Dev_Interleaver, Dev_ColumnDegree,N,NbBranch, iter);  
-            cudaDeviceSynchronize();
+      // Outer loop dependant upon all the batch states and max number of allowable decode iterations
+      // (max of 100) the number of VN node updates thru parity checks
+      int iter=0;
+      while (batch_state == 1 && iter < NbIter) {
 
-            // Update the CN to VN message array
-            CheckPassGB<<< ceil(M/32.0), 32 >>> (Dev_CtoV, Dev_VtoC, M,NbBranch,Dev_RowDegree); 
-            cudaDeviceSynchronize();
 
-            //  Update the VN's (VN's are stored in the Decide array)
-            APP_GB  <<<ceil(N/32.0), 32>>> (Dev_Decide, Dev_CtoV, Dev_Receivedword, Dev_Interleaver, Dev_ColumnDegree, N,M, NbBranch); 
-            cudaDeviceSynchronize();
-      
-            // Check to see if updated codeword has been recovered
-            ComputeSyndrome <<<ceil(M/32.0), 32>>>(Dev_Decide, Dev_Mat, Dev_RowDegree, M, Dev_Syndrome); 
-            cudaDeviceSynchronize();
 
-            if (cudaMemcpy(IsCodeword, Dev_Syndrome,  sizeof(int), cudaMemcpyDeviceToHost) != cudaSuccess){
-              printf("data transfer error from device to Dev Syndrome\n");
-              return 0;
-            }
-            
-            cudaDeviceSynchronize();
-      
-            if (*IsCodeword) 
-              break;
-          }
+        //============================================================================
+        // Decoder
+        //============================================================================
+        // Initialize the CN to VN message array to 0
+        //for (k=0; k<NbBranch; k++) {
+        //  CtoV[k]=0; }
 
-          // Copy decoded codeword back to host
-          if (cudaMemcpy(Decide[bidx], Dev_Decide, N * sizeof(int), cudaMemcpyDeviceToHost) != cudaSuccess){
-            printf("data transfer error from device to host on Dev Decide\n");
-            return 0;
-            }
+          // Loop for each stream to set off sequential kernel execution by stream
+          for (int k=0; k<stream_count; k++) {
+            // Check if stream is still in active state
+            if (stream_state[k] == 1){
+              // Update VN to CN message array
+              DataPassGB <<< ceil(N/32.0), 32, 0, stream[k] >>> (Dev_VtoC[k], Dev_CtoV[k], Dev_Receivedword[k], Dev_Interleaver, Dev_ColumnDegree, N, NbBranch, iter);  
+              // Update the CN to VN message array
+              CheckPassGB<<< ceil(M/32.0), 32, 0, stream[k] >>> (Dev_CtoV[k], Dev_VtoC[k], M, NbBranch, Dev_RowDegree); 
+              //  Update the VN's (VN's are stored in the Decide array)
+              APP_GB  <<< ceil(N/32.0), 32, 0, stream[k] >>> (Dev_Decide[k], Dev_CtoV[k], Dev_Receivedword[k], Dev_Interleaver, Dev_ColumnDegree, N, M, NbBranch); 
+              // Check to see if updated codeword has been recovered
+              ComputeSyndrome <<< ceil(M/32.0), 32, 0, stream[k] >>> (Dev_Decide[k], Dev_Mat, Dev_RowDegree, M, Dev_Syndrome[k]); 
               
-          cudaDeviceSynchronize();
+              
+              // UPDATE MEMORY TYPE AND INDEX IsCodeword IN DECLARATION ABOVE
+              // Test to see if codeword recovered
+              cudaMemcpyAsync(IsCodeword[k], Dev_Syndrome[k],  sizeof(int), cudaMemcpyDeviceToHost, stream[k])
+              if (*IsCodeword[k]){
+                // Update state array and copy recovered codeword back to host
+                stream_state[k] = 0;
+                cudaMemcpyAsync(Decide[k], Dev_Decide[k], N * sizeof(int), cudaMemcpyDeviceToHost, stream[k]) 
+              }
+            }
+
+          }
+          // Sync streams for host side checks and updates
+          for (int m=0; m<stream_count; m++) {
+            cudaStreamSynchronize(stream[m]);
+          }
+          // Update variables for next round of streams
+          iter++;
+          int state_check = 0;
+          for (int m=0; m<stream_count; m++) {
+            state_check ^= stream_state[m];
+            if (state_check == 1) {
+              batch_state = 1;
+              break; 
+            }
+          }
+              
+      }
+      // Sync Host and Device
+      cudaDeviceSynchronize();
 
       //============================================================================
   	  // Verification:  Uncomment for short runs
 	    //============================================================================
-      
+      /*
       // Output uncorrupted codewords to file for verification purposes
       FILE *fptr1;
       fptr1 = (fopen("codewords_test_verification_pre_corrupt_02.txt", "a+"));
@@ -483,7 +529,7 @@ int main(int argc, char * argv[])
         fprintf(fptr2, "%u %s", Decide[k], "");
       fprintf(fptr2, "%s", "\n");
       fclose(fptr2);
-      
+      */
 
       // Print out number of iterations decoder took
       printf("Number of decoder iterations: ");
@@ -519,8 +565,8 @@ int main(int argc, char * argv[])
       // Stopping Criterion
 	    if (NbTotalErrors==NBframes) break;
       */
-     }
     }
+    
 
     // Print final statistics
     /*
