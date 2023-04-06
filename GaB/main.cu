@@ -45,7 +45,8 @@ int VerificationComputeSyndrome(int *Decide,int **Mat,int *RowDegree,int M)
 }
 
 // Codeword generator Function (Batch Processing) #####################################################
-int CodewordBatchGenerator(int **Codeword, int **Receivedword, int **MatG, int *PermG, float alpha, int rank, int N, int *U, int Batch_size) {
+int CodewordBatchGenerator(int **Codeword, int **Receivedword, int **MatG, int *PermG, float alpha, int rank, int N, int *U, int Batch_size) 
+{
   int k, l, n;
   int bidx;
   
@@ -133,7 +134,7 @@ int GaussianElimination_MRB(int *Perm,int **MatOut,int **Mat,int M,int N)
 // argv 3 = codeword batch size
 // argv 4 = reserved
 // argv 5 = reserved
-int main(int argc, char * argv[])
+int main(int argc, char * argv[]) 
 {
   // ----------------------------------------------------
   // Assign function inputs
@@ -184,11 +185,11 @@ int main(int argc, char * argv[])
   // ----------------------------------------------------
   // Overrides for verification and testing runs
   // ----------------------------------------------------
-  alpha= 0.00001; 
-  alpha_max = 0.00001;
-  alpha_min = 0.00001;
-  alpha_step = 0.00001;
-  NbMonteCarlo=40;
+  alpha= 0.04; 
+  alpha_max = 0.04;
+  alpha_min = 0.04;
+  alpha_step = 0.04;
+  NbMonteCarlo=100;
   
   // ----------------------------------------------------
   // Load Matrix
@@ -262,11 +263,24 @@ int main(int argc, char * argv[])
   // ----------------------------------------------------
   // Decoder variables and Host memory allocation
   // ----------------------------------------------------
-  int *CtoV,*VtoC,**Codeword,**Receivedword,**Decide,*U,l,kk;
+  int **CtoV,**VtoC,**Codeword,**Receivedword,**Decide,*U,l,kk;
   int iter,numB;
-  CtoV=(int *)calloc(NbBranch,sizeof(int));
-  VtoC=(int *)calloc(NbBranch,sizeof(int));
   
+  CtoV=(int **)calloc(Batch_size,sizeof(int *));
+  for (k=0;k<Batch_size;k++) 
+      CtoV[k]=(int *)calloc(NbBranch,sizeof(int));
+  
+  VtoC=(int **)calloc(Batch_size,sizeof(int *));
+  for (k=0;k<Batch_size;k++) 
+      VtoC[k]=(int *)calloc(NbBranch,sizeof(int));
+
+  // debug code
+  /*
+  for (int dd=0; dd<NbBranch; dd++) {
+    VtoC[0][dd] = 2;
+  }
+  */
+
   Codeword=(int **)calloc(Batch_size,sizeof(int *));
   for (k=0;k<Batch_size;k++) 
         Codeword[k]=(int *)calloc(N,sizeof(int));
@@ -297,7 +311,7 @@ int main(int argc, char * argv[])
   //for (m=0;m<N;m++) printf("%d\t",PermG[m]);printf("\n");
 
   // Variables for Statistics
-  int *IsCodeword = (int *)calloc(1, sizeof(int *)) ,nb;
+  int nb;
   int NiterMoy,NiterMax;
   int Dmin;
   int NbTotalErrors,NbBitError;
@@ -362,13 +376,13 @@ int main(int argc, char * argv[])
     }
   }
 
-
-
   // ----------------------------------------------------
   // Stream based Device Memory allocations
   // ----------------------------------------------------
-  // Declare stream sizes
+  // Declare stream sizes, state array and CUDA streams
   int stream_count = Batch_size;
+  int stream_state[stream_count];
+  cudaStream_t stream[stream_count];
   
   // Declare stream based device memory pointers
   // Definitions:
@@ -379,7 +393,8 @@ int main(int argc, char * argv[])
   // DEV_CtoV is the CN to VN message array
   int *Dev_Receivedword[stream_count], *Dev_Decide[stream_count], *Dev_Syndrome[stream_count];
   int *Dev_VtoC[stream_count], *Dev_CtoV[stream_count];
-
+  int *IsCodeword[stream_count];
+  
   // Allocate memory on the GPU for each stream
   for (int m=0; m<stream_count; m++) {
     cudaMalloc((void **) &Dev_Receivedword[m], N * sizeof(int));
@@ -388,27 +403,18 @@ int main(int argc, char * argv[])
     cudaMalloc((void **) &Dev_VtoC[m], NbBranch * sizeof(int));
     cudaMalloc((void **) &Dev_CtoV[m], NbBranch * sizeof(int));
   }
-  
 
+  // Assign host side pinned memory where each word and initialized message arrays will be assigned to a stream
+  for (int m=0; m<stream_count; m++) {
 
-
-
-
-
-
-  //Copy VtoC and CtoV message arrays to device memory
-  if (cudaMemcpy(Dev_VtoC, VtoC, NbBranch * sizeof(int), cudaMemcpyHostToDevice) != cudaSuccess){
-    printf("data transfer error from host to device on deviceB\n");
-    return 0;
+    cudaHostAlloc((void**) &Receivedword[m], N * sizeof(int), cudaHostAllocDefault);
+    cudaHostAlloc((void**) &Decide[m], N * sizeof(int), cudaHostAllocDefault);
+    cudaHostAlloc((void**) &IsCodeword[m], sizeof(int), cudaHostAllocDefault);
+    
+    // MIGHT BE ABLE TO INITIALIZE THESE ONCE SINCE THEY ARE THE SAME FOR EACH BATCH LAUNCH!!!!!!!!!!!!!!!!!!!!!
+    cudaHostAlloc((void**) &VtoC[m], NbBranch * sizeof(int), cudaHostAllocDefault);
+    cudaHostAlloc((void**) &CtoV[m], NbBranch * sizeof(int), cudaHostAllocDefault);
   }
-  if (cudaMemcpy(Dev_CtoV, CtoV, NbBranch * sizeof(int), cudaMemcpyHostToDevice) != cudaSuccess){
-    printf("data transfer error from host to device on deviceB\n");
-    return 0;
-  }
-      
-
-
- 
 
 
   // Loop for different channel bit error rates
@@ -418,9 +424,7 @@ int main(int argc, char * argv[])
     NbTotalErrors=0;NbBitError=0;
     NbUnDetectedErrors=0;NbError=0;
 
-
-    //--------------------------------------------------------------
-    // Main loop for max number of codeword simulations
+    // Main loop for max number of codeword simulations per bit error rate
     for (nb=0, nbtestedframes=0; nb<NbMonteCarlo; nb += Batch_size) {
       
       // Fill codeword pseudo buffer
@@ -428,74 +432,120 @@ int main(int argc, char * argv[])
 
       // Initialize stream state array (1 = not complete, 0 = complete)
       // and batch state detector
-      int stream_state[Batch_size];
-      for (int state=0; state<Batch_size; state++){
-        stream_state[state] = 1;
+      for (int m=0; m<Batch_size; m++){
+        stream_state[m] = 1;
       }
       int batch_state = 1;
+      int iter=0;
 
-      // Declare and invoke streams
-      cudaStream_t stream[stream_count];
+      // invoke streams
       for (int m=0; m<stream_count; m++) {
         cudaStreamCreate(&stream[m]);
       }
 
-      // Assign host side pinned memory where each word will be assigned to a stream
+      // Stream corrupted codeword and message arrays from pinned host memory to device
       for (int m=0; m<stream_count; m++) {
-        cudaHostAlloc((void**)&Receivedword[m], N * sizeof(int), cudaHostAllocDefault);
+        
+        
+
+        if(cudaMemcpyAsync(Dev_Receivedword[m], Receivedword[m], N * sizeof(int), cudaMemcpyHostToDevice, stream[m]) != cudaSuccess){
+          printf("Mem tx issue \n");
+        }
+        
+        
+        // I'm commenting the following out since syndrome does not need to be initialized with any particular value for kernel
+        //cudaMemcpyAsync(Dev_Decide[m], Decide[m], N * sizeof(int), cudaMemcpyHostToDevice, stream[m]);
+        //cudaMemcpyAsync(Dev_Syndrome[m], Syndrome[m], sizeof(int), cudaMemcpyHostToDevice, stream[m]);
+
+        //cudaMemcpyAsync(Dev_VtoC[m], VtoC[m], NbBranch * sizeof(int), cudaMemcpyHostToDevice, stream[m]);
+        cudaMemcpyAsync(Dev_CtoV[m], CtoV[m], NbBranch * sizeof(int), cudaMemcpyHostToDevice, stream[m]);
       }
 
-      // Stream corrupted codeword from pinned host memory to device
-      for (int m=1; m<stream_count; m++) {
-        cudaMemcpyAsync(Dev_Receivedword[m], Receivedword[m], N * sizeof(int), cudaMemcpyHostToDevice, stream[m]);
-      }
+            // Sync Host and Device
+            cudaDeviceSynchronize();
 
       // Outer loop dependant upon all the batch states and max number of allowable decode iterations
-      // (max of 100) the number of VN node updates thru parity checks
-      int iter=0;
       while (batch_state == 1 && iter < NbIter) {
-
-
-
-        //============================================================================
-        // Decoder
-        //============================================================================
-        // Initialize the CN to VN message array to 0
-        //for (k=0; k<NbBranch; k++) {
-        //  CtoV[k]=0; }
 
           // Loop for each stream to set off sequential kernel execution by stream
           for (int k=0; k<stream_count; k++) {
             // Check if stream is still in active state
             if (stream_state[k] == 1){
+              
+              //debug code
+              /*
+              printf("Receivedword[0] is: %d \n",Receivedword[k][0]);
+              printf("Receivedword[1] is: %d \n",Receivedword[k][1]);
+              printf("Receivedword[2] is: %d \n",Receivedword[k][2]);
+              */
+
+
+              
               // Update VN to CN message array
               DataPassGB <<< ceil(N/32.0), 32, 0, stream[k] >>> (Dev_VtoC[k], Dev_CtoV[k], Dev_Receivedword[k], Dev_Interleaver, Dev_ColumnDegree, N, NbBranch, iter);  
+
+              // debug code
+              cudaMemcpyAsync(VtoC[k],Dev_VtoC[k], NbBranch * sizeof(int), cudaMemcpyDeviceToHost, stream[k]);
+
+
               // Update the CN to VN message array
               CheckPassGB<<< ceil(M/32.0), 32, 0, stream[k] >>> (Dev_CtoV[k], Dev_VtoC[k], M, NbBranch, Dev_RowDegree); 
               //  Update the VN's (VN's are stored in the Decide array)
               APP_GB  <<< ceil(N/32.0), 32, 0, stream[k] >>> (Dev_Decide[k], Dev_CtoV[k], Dev_Receivedword[k], Dev_Interleaver, Dev_ColumnDegree, N, M, NbBranch); 
               // Check to see if updated codeword has been recovered
               ComputeSyndrome <<< ceil(M/32.0), 32, 0, stream[k] >>> (Dev_Decide[k], Dev_Mat, Dev_RowDegree, M, Dev_Syndrome[k]); 
-              
-              
-              // UPDATE MEMORY TYPE AND INDEX IsCodeword IN DECLARATION ABOVE
-              // Test to see if codeword recovered
-              cudaMemcpyAsync(IsCodeword[k], Dev_Syndrome[k],  sizeof(int), cudaMemcpyDeviceToHost, stream[k])
-              if (*IsCodeword[k]){
-                // Update state array and copy recovered codeword back to host
-                stream_state[k] = 0;
-                cudaMemcpyAsync(Decide[k], Dev_Decide[k], N * sizeof(int), cudaMemcpyDeviceToHost, stream[k]) 
+              // Update host side memory for host controller decoder convergence check
+              cudaMemcpyAsync(IsCodeword[k], Dev_Syndrome[k],  sizeof(int), cudaMemcpyDeviceToHost, stream[k]);
+              // Update most recent decoded codeword copy to host memory (Most messages will recover with no iterations)
+              cudaMemcpyAsync(Decide[k], Dev_Decide[k], N * sizeof(int), cudaMemcpyDeviceToHost, stream[k]);
+            }
+          }
+
+            // Sync Host and Device
+            cudaDeviceSynchronize();
+
+          // Sync active streams for host side checks and updates
+          for (int m=0; m<stream_count; m++) {
+            if (stream_state[m] == 1)
+              cudaStreamSynchronize(stream[m]);
+              cudaDeviceSynchronize();
+              //printf("In CHECK loop \n");
+          }
+
+          // Check for codeword recovery and update stream states as neccissary
+          for (int m=0; m<stream_count; m++) {
+            if (stream_state[m] == 1) {
+              if (*IsCodeword[m]) {
+              //if (IsCodeword[m]) {
+                // Update stream state array and kill stream
+                stream_state[m] = 0;
+                cudaStreamDestroy(stream[m]);
+                // Debug code
+                // Print out number of iterations decoder took
+                printf("Codework check value =  %d  for Stream %d recovered in %d runs \n",*IsCodeword[m],m,iter);
+                
+                /*
+                for (int j=0; j<N; j++) {
+                  printf("%d ", Decide[m][j]);
+                }
+                printf("\n");
+                printf("\n");
+                */
+                 /*
+                printf("\n");
+                printf("\n");
+                for (int j=0; j<NbBranch; j++) {
+                  printf("%d ", VtoC[m][j]);
+                }         
+                */       
               }
             }
+          }
 
-          }
-          // Sync streams for host side checks and updates
-          for (int m=0; m<stream_count; m++) {
-            cudaStreamSynchronize(stream[m]);
-          }
           // Update variables for next round of streams
           iter++;
           int state_check = 0;
+          batch_state = 0;
           for (int m=0; m<stream_count; m++) {
             state_check ^= stream_state[m];
             if (state_check == 1) {
@@ -505,8 +555,17 @@ int main(int argc, char * argv[])
           }
               
       }
+      
+      // Kill any residual streams associated with codeword that was not recovered
+      for (int m=0; m<stream_count; m++) {
+        if (stream_state[m] == 1)
+          cudaStreamDestroy(stream[m]);
+      }
+      
       // Sync Host and Device
       cudaDeviceSynchronize();
+
+
 
       //============================================================================
   	  // Verification:  Uncomment for short runs
@@ -531,12 +590,10 @@ int main(int argc, char * argv[])
       fclose(fptr2);
       */
 
-      // Print out number of iterations decoder took
-      printf("Number of decoder iterations: ");
-      printf("%6d|\n", iter);
+
 
       // Run H*CW syndrome check
-      VerificationComputeSyndrome(Decide[bidx],Mat,RowDegree,M);
+      //VerificationComputeSyndrome(Decide[bidx],Mat,RowDegree,M);
       
 
       
@@ -562,10 +619,10 @@ int main(int argc, char * argv[])
 		      Dmin=min(Dmin,NbError);
 	      }
 	
-      // Stopping Criterion
+      // Stopping Criterion (IMPORTANT TO ADD THIS BACK IN!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!)
 	    if (NbTotalErrors==NBframes) break;
       */
-    }
+      }
     
 
     // Print final statistics
@@ -584,9 +641,31 @@ int main(int argc, char * argv[])
     fprintf(f,"%1.2f(%d)\t\t",(float)NiterMoy/nbtestedframes,NiterMax);
     fprintf(f,"%d(%d)\n",NbUnDetectedErrors,Dmin);
     */
+
+
+
+
+  
   }
 
+  //  Clean Memory
+  for (int m=0; m<stream_count; m++) {
+    // Free pinned memory
+    cudaFreeHost(Receivedword[m]);
+    cudaFreeHost(Decide[m]);
+    cudaFreeHost(IsCodeword[m]);
+    cudaFreeHost(VtoC[m]);
+    cudaFreeHost(CtoV[m]);
 
-    fclose(f);
-    return(0);
+    // Free device memory
+    cudaFree(Dev_Receivedword[m]);
+    cudaFree(Dev_Decide[m]);
+    cudaFree(Dev_Syndrome[m]);
+    cudaFree(Dev_VtoC[m]);
+    cudaFree(Dev_CtoV[m]);
+  }
+
+  fclose(f);
+  return(0);
+
 }

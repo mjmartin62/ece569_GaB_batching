@@ -24,12 +24,37 @@ __global__ void DataPassGB(int *VtoC, int *CtoV, int *Receivedword, int *Interle
 	int Global;
 	numB=0;
 	
+
+
+
         n = threadIdx.x + blockIdx.x*blockDim.x;
+
+    //debug code ####################################################################################
+    /*
+    if (n == 0) {
+        printf("VtoC[0] is: %d \n",VtoC[0]);
+        printf("VtoC[1] is: %d \n",VtoC[1]);
+        printf("VtoC[2] is: %d \n",VtoC[2]);
+        
+        printf("Receivedword[0] is: %d \n",Receivedword[0]);
+        printf("Receivedword[1] is: %d \n",Receivedword[1]);
+        printf("Receivedword[2] is: %d \n",Receivedword[2]);
+       
+        
+        }
+        */
+
+
         numB = ColumnDegree[n] * n;
     if (n < N) {
         if (iter == 0) {
               for (t=0;t<ColumnDegree[n];t++)     
                VtoC[Interleaver[numB+t]]=Receivedword[n];
+
+
+
+
+
         } else {
         
 		       //Global=(Amplitude)*(1-2*ReceivedSymbol[n]);
@@ -50,6 +75,7 @@ __global__ void DataPassGB(int *VtoC, int *CtoV, int *Receivedword, int *Interle
 }
 //#####################################################################################################
 //#####################################################################################################
+/*
 __global__ void DataPassGBIter0(int *Dev_VtoC,int *Dev_CtoV,int *Dev_Receivedword,int *Dev_Interleaver,int *Dev_ColumnDegree,int N,int NbBranch)
 {
 	int t,numB,buf;
@@ -62,6 +88,7 @@ __global__ void DataPassGBIter0(int *Dev_VtoC,int *Dev_CtoV,int *Dev_Receivedwor
         }
      }
 }
+*/
 
 //##################################################################################################
 __global__ void CheckPassGB(int *CtoV,int *VtoC,int M,int NbBranch,int *RowDegree)
