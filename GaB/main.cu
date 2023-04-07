@@ -173,7 +173,7 @@ int main(int argc, char * argv[])
   // ----------------------------------------------------
   NbMonteCarlo=100000;	    // Maximum nb of codewords sent
   NbIter=200; 	            // Maximum nb of iterations
-  alpha= 0.01;              // Channel probability of error
+  //alpha= 0.01;              // Channel probability of error
   NBframes=100;	            // Simulation stops when NBframes in error
   Graine=1;		            // Seed Initialization for Multiple Simulations
 
@@ -185,11 +185,13 @@ int main(int argc, char * argv[])
   // ----------------------------------------------------
   // Overrides for verification and testing runs
   // ----------------------------------------------------
-  alpha= 0.04; 
-  alpha_max = 0.04;
-  alpha_min = 0.04;
-  alpha_step = 0.04;
-  NbMonteCarlo=100;
+  
+  alpha_max = 0.0600;
+  alpha_min= 0.0100;
+  alpha_step=0.0100;
+  
+  NbMonteCarlo=100000;
+  
   
   // ----------------------------------------------------
   // Load Matrix
@@ -264,7 +266,8 @@ int main(int argc, char * argv[])
   // Decoder variables and Host memory allocation
   // ----------------------------------------------------
   int **CtoV,**VtoC,**Codeword,**Receivedword,**Decide,*U,l,kk;
-  int iter,numB;
+  int iter_batch,numB;
+  int iter[Batch_size];
   
   CtoV=(int **)calloc(Batch_size,sizeof(int *));
   for (k=0;k<Batch_size;k++) 
@@ -274,12 +277,6 @@ int main(int argc, char * argv[])
   for (k=0;k<Batch_size;k++) 
       VtoC[k]=(int *)calloc(NbBranch,sizeof(int));
 
-  // debug code
-  /*
-  for (int dd=0; dd<NbBranch; dd++) {
-    VtoC[0][dd] = 2;
-  }
-  */
 
   Codeword=(int **)calloc(Batch_size,sizeof(int *));
   for (k=0;k<Batch_size;k++) 
@@ -315,19 +312,19 @@ int main(int argc, char * argv[])
   int NiterMoy,NiterMax;
   int Dmin;
   int NbTotalErrors,NbBitError;
-  int NbUnDetectedErrors,NbError;
+  int NbUnDetectedErrors,NbError[Batch_size];
   int *energy;
   energy=(int *)calloc(N,sizeof(int));
 
   strcpy(FileName,FileResult);
   f=fopen(FileName,"w");
-  /*
+  
   fprintf(f,"-------------------------Gallager B--------------------------------------------------\n");
   fprintf(f,"alpha\t\tNbEr(BER)\t\tNbFer(FER)\t\tNbtested\t\tIterAver(Itermax)\t\tNbUndec(Dmin)\n");
 
   printf("-------------------------Gallager B  Parallel code--------------------------------------------------\n");
-  printf("alpha\t\t\tNbEr(BER)\t\tNbFer(FER)\t\tNbtested\t\tIterAver(Itermax)\t\tNbUndec(Dmin)\n");
-  */
+  printf("alpha\t\t\tNbEr(BER)\t\t\t\tNbFer(FER)\t\t\tNbtested\t\tIterAver(Itermax)\t\tNbUndec(Dmin)\n");
+  
 
   // ----------------------------------------------------
   // Constant Device Memory allocations
@@ -422,7 +419,8 @@ int main(int argc, char * argv[])
     NiterMoy=0;NiterMax=0;
     Dmin=1e5;
     NbTotalErrors=0;NbBitError=0;
-    NbUnDetectedErrors=0;NbError=0;
+    NbUnDetectedErrors=0;
+    //NbError=0;
 
     // Main loop for max number of codeword simulations per bit error rate
     for (nb=0, nbtestedframes=0; nb<NbMonteCarlo; nb += Batch_size) {
@@ -436,7 +434,9 @@ int main(int argc, char * argv[])
         stream_state[m] = 1;
       }
       int batch_state = 1;
-      int iter=0;
+      
+      // Initialize iteration trackers
+      int iter_batch=0;
 
       // invoke streams
       for (int m=0; m<stream_count; m++) {
@@ -465,7 +465,7 @@ int main(int argc, char * argv[])
             cudaDeviceSynchronize();
 
       // Outer loop dependant upon all the batch states and max number of allowable decode iterations
-      while (batch_state == 1 && iter < NbIter) {
+      while (batch_state == 1 && iter_batch < NbIter) {
 
           // Loop for each stream to set off sequential kernel execution by stream
           for (int k=0; k<stream_count; k++) {
@@ -482,7 +482,7 @@ int main(int argc, char * argv[])
 
               
               // Update VN to CN message array
-              DataPassGB <<< ceil(N/32.0), 32, 0, stream[k] >>> (Dev_VtoC[k], Dev_CtoV[k], Dev_Receivedword[k], Dev_Interleaver, Dev_ColumnDegree, N, NbBranch, iter);  
+              DataPassGB <<< ceil(N/32.0), 32, 0, stream[k] >>> (Dev_VtoC[k], Dev_CtoV[k], Dev_Receivedword[k], Dev_Interleaver, Dev_ColumnDegree, N, NbBranch, iter_batch);  
 
               // debug code
               cudaMemcpyAsync(VtoC[k],Dev_VtoC[k], NbBranch * sizeof(int), cudaMemcpyDeviceToHost, stream[k]);
@@ -516,13 +516,14 @@ int main(int argc, char * argv[])
           for (int m=0; m<stream_count; m++) {
             if (stream_state[m] == 1) {
               if (*IsCodeword[m]) {
-              //if (IsCodeword[m]) {
+              
                 // Update stream state array and kill stream
+                iter[m] = iter_batch;
                 stream_state[m] = 0;
                 cudaStreamDestroy(stream[m]);
                 // Debug code
                 // Print out number of iterations decoder took
-                printf("Codework check value =  %d  for Stream %d recovered in %d runs \n",*IsCodeword[m],m,iter);
+                //printf("Codework check value =  %d  for Stream %d recovered in %d runs \n",*IsCodeword[m],m,iter[m]);
                 
                 /*
                 for (int j=0; j<N; j++) {
@@ -542,10 +543,11 @@ int main(int argc, char * argv[])
             }
           }
 
-          // Update variables for next round of streams
-          iter++;
+          // Update batch tracking variables for next round of streams
+          iter_batch++;
           int state_check = 0;
           batch_state = 0;
+          // Check to see if all streams converged to decoded codeword
           for (int m=0; m<stream_count; m++) {
             state_check ^= stream_state[m];
             if (state_check == 1) {
@@ -557,9 +559,12 @@ int main(int argc, char * argv[])
       }
       
       // Kill any residual streams associated with codeword that was not recovered
+      // and set the number of decoder iterations to the max allowable iterations
       for (int m=0; m<stream_count; m++) {
-        if (stream_state[m] == 1)
+        if (stream_state[m] == 1) {
           cudaStreamDestroy(stream[m]);
+          iter[m] = iter_batch;
+        }
       }
       
       // Sync Host and Device
@@ -598,35 +603,58 @@ int main(int argc, char * argv[])
 
       
 	    //============================================================================
-  	  // Compute Statistics
+  	  // Batch Compute Statistics
 	    //============================================================================
-      /*
-      nbtestedframes++;
-	    NbError=0;for (k=0;k<N;k++)  if (Decide[k]!=Codeword[k]) NbError++;
-	    NbBitError=NbBitError+NbError;
-	    // Case Divergence
-	    if (!(*IsCodeword)) {
-		    NiterMoy=NiterMoy+NbIter;
-		    NbTotalErrors++;
+      // update number of tested messages (aka frames)
+      nbtestedframes += Batch_size;
+
+      // Update total number of bit errors
+      // Outer loop sweeps across the batch, inner loop calculates bit errors per message
+	    // Initialize number of bit errors per codeword to zero
+      for (int k=0; k<Batch_size; k++)
+        NbError[k]=0;
+      for (int k=0; k<Batch_size; k++) {
+        for (int j=0; j<N; j++) {
+          if (Decide[k][j] != Codeword[k][j]) 
+            NbError[k]++;
+        }
+	      NbBitError = NbBitError + NbError[k];
+      }
+	    
+      // Case Divergence
+      for (int k=0; k<Batch_size; k++) {
+	      if (!(*IsCodeword[k])) {
+		      NiterMoy=NiterMoy+NbIter;
+		      NbTotalErrors++;
+        }
 	    }
 
-	    // Case Convergence to Right Codeword
-	    if ((*IsCodeword)&&(NbError==0)) { NiterMax=max(NiterMax,iter+1); NiterMoy=NiterMoy+(iter+1); }
+	    
+      for (int k=0; k<Batch_size; k++) {
+	      // Case Convergence to Right Codeword
+        if ((*IsCodeword[k]) && (NbError[k]==0)) { 
+          NiterMax = max(NiterMax,iter[k]+1); 
+          NiterMoy = NiterMoy+(iter[k]+1); 
+        }
 	      // Case Convergence to Wrong Codeword
-	      if ((*IsCodeword)&&(NbError!=0)) {
-		      NiterMax=max(NiterMax,iter+1); NiterMoy=NiterMoy+(iter+1);
-		      NbTotalErrors++; NbUnDetectedErrors++;
-		      Dmin=min(Dmin,NbError);
+	      if ((*IsCodeword[k]) && (NbError[k]!=0)) {
+		      NiterMax = max(NiterMax,iter[k]+1); 
+          NiterMoy = NiterMoy + (iter[k]+1);
+		      NbTotalErrors++; 
+          NbUnDetectedErrors++;
+		      Dmin = min(Dmin,NbError[k]);
 	      }
-	
-      // Stopping Criterion (IMPORTANT TO ADD THIS BACK IN!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!)
-	    if (NbTotalErrors==NBframes) break;
-      */
+      
       }
-    
+      
+      // Stopping Criterion 
+	    if (NbTotalErrors >= NBframes) 
+        break;
 
-    // Print final statistics
-    /*
+    }
+    
+    // Print final statistics for each alpha setting
+
     printf("%1.5f\t\t",alpha);
     printf("%10d (%1.16f)\t\t",NbBitError,(float)NbBitError/N/nbtestedframes);
     printf("%4d (%1.16f)\t\t",NbTotalErrors,(float)NbTotalErrors/nbtestedframes);
@@ -640,16 +668,12 @@ int main(int argc, char * argv[])
     fprintf(f,"%10d\t\t",nbtestedframes);
     fprintf(f,"%1.2f(%d)\t\t",(float)NiterMoy/nbtestedframes,NiterMax);
     fprintf(f,"%d(%d)\n",NbUnDetectedErrors,Dmin);
-    */
-
-
-
-
-  
+    
   }
 
   //  Clean Memory
-  for (int m=0; m<stream_count; m++) {
+  for (int m=0; m<stream_count; m++) 
+  {
     // Free pinned memory
     cudaFreeHost(Receivedword[m]);
     cudaFreeHost(Decide[m]);
@@ -668,4 +692,5 @@ int main(int argc, char * argv[])
   fclose(f);
   return(0);
 
+  
 }
