@@ -140,7 +140,7 @@ int main(int argc, char * argv[])
   // Assign function inputs
   // ----------------------------------------------------
   int Batch_size = std::stoi(argv[3]);
-  int reserved_4 = std::stoi(argv[4]);
+  int Block_size = std::stoi(argv[4]);
   int reserved_5 = std::stoi(argv[5]);
   int reserved_6 = std::stoi(argv[6]);
   /*
@@ -148,7 +148,9 @@ int main(int argc, char * argv[])
   printf("Block size test: ");
   printf("%6d\n", block_size);
   */
-  
+  // Recast block size
+  //dim3 Block_size;
+  //Block_size = dim3(Block_size_input, 1,1);
   
   
   // Variables Declaration
@@ -266,7 +268,7 @@ int main(int argc, char * argv[])
   // Decoder variables and Host memory allocation
   // ----------------------------------------------------
   int **CtoV,**VtoC,**Codeword,**Receivedword,**Decide,*U,l,kk;
-  int iter_batch,numB;
+  int numB;
   int iter[Batch_size];
   
   CtoV=(int **)calloc(Batch_size,sizeof(int *));
@@ -458,11 +460,11 @@ int main(int argc, char * argv[])
         //cudaMemcpyAsync(Dev_Syndrome[m], Syndrome[m], sizeof(int), cudaMemcpyHostToDevice, stream[m]);
 
         //cudaMemcpyAsync(Dev_VtoC[m], VtoC[m], NbBranch * sizeof(int), cudaMemcpyHostToDevice, stream[m]);
-        cudaMemcpyAsync(Dev_CtoV[m], CtoV[m], NbBranch * sizeof(int), cudaMemcpyHostToDevice, stream[m]);
+        //cudaMemcpyAsync(Dev_CtoV[m], CtoV[m], NbBranch * sizeof(int), cudaMemcpyHostToDevice, stream[m]);
       }
 
             // Sync Host and Device
-            cudaDeviceSynchronize();
+            //cudaDeviceSynchronize();
 
       // Outer loop dependant upon all the batch states and max number of allowable decode iterations
       while (batch_state == 1 && iter_batch < NbIter) {
@@ -482,18 +484,16 @@ int main(int argc, char * argv[])
 
               
               // Update VN to CN message array
-              DataPassGB <<< ceil(N/32.0), 32, 0, stream[k] >>> (Dev_VtoC[k], Dev_CtoV[k], Dev_Receivedword[k], Dev_Interleaver, Dev_ColumnDegree, N, NbBranch, iter_batch);  
+              DataPassGB <<< ceil(N/(float)Block_size), Block_size, 0, stream[k] >>> (Dev_VtoC[k], Dev_CtoV[k], Dev_Receivedword[k], Dev_Interleaver, Dev_ColumnDegree, N, NbBranch, iter_batch);  
 
-              // debug code
-              cudaMemcpyAsync(VtoC[k],Dev_VtoC[k], NbBranch * sizeof(int), cudaMemcpyDeviceToHost, stream[k]);
 
 
               // Update the CN to VN message array
-              CheckPassGB<<< ceil(M/32.0), 32, 0, stream[k] >>> (Dev_CtoV[k], Dev_VtoC[k], M, NbBranch, Dev_RowDegree); 
+              CheckPassGB<<< ceil(M/(float)Block_size), Block_size, 0, stream[k] >>> (Dev_CtoV[k], Dev_VtoC[k], M, NbBranch, Dev_RowDegree); 
               //  Update the VN's (VN's are stored in the Decide array)
-              APP_GB  <<< ceil(N/32.0), 32, 0, stream[k] >>> (Dev_Decide[k], Dev_CtoV[k], Dev_Receivedword[k], Dev_Interleaver, Dev_ColumnDegree, N, M, NbBranch); 
+              APP_GB  <<< ceil(N/(float)Block_size), Block_size, 0, stream[k] >>> (Dev_Decide[k], Dev_CtoV[k], Dev_Receivedword[k], Dev_Interleaver, Dev_ColumnDegree, N, M, NbBranch); 
               // Check to see if updated codeword has been recovered
-              ComputeSyndrome <<< ceil(M/32.0), 32, 0, stream[k] >>> (Dev_Decide[k], Dev_Mat, Dev_RowDegree, M, Dev_Syndrome[k]); 
+              ComputeSyndrome <<< ceil(M/(float)Block_size), Block_size, 0, stream[k] >>> (Dev_Decide[k], Dev_Mat, Dev_RowDegree, M, Dev_Syndrome[k]); 
               // Update host side memory for host controller decoder convergence check
               cudaMemcpyAsync(IsCodeword[k], Dev_Syndrome[k],  sizeof(int), cudaMemcpyDeviceToHost, stream[k]);
               // Update most recent decoded codeword copy to host memory (Most messages will recover with no iterations)
@@ -508,7 +508,7 @@ int main(int argc, char * argv[])
           for (int m=0; m<stream_count; m++) {
             if (stream_state[m] == 1)
               cudaStreamSynchronize(stream[m]);
-              cudaDeviceSynchronize();
+              //cudaDeviceSynchronize();
               //printf("In CHECK loop \n");
           }
 
