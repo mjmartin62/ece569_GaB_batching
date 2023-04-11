@@ -188,11 +188,11 @@ int main(int argc, char * argv[])
   // Overrides for verification and testing runs
   // ----------------------------------------------------
   
-  alpha_max = 0.0600;
-  alpha_min= 0.0100;
+  alpha_max = 0.0400;
+  alpha_min= 0.0400;
   alpha_step=0.0100;
   
-  NbMonteCarlo=100000;
+  NbMonteCarlo=10;
   
   
   // ----------------------------------------------------

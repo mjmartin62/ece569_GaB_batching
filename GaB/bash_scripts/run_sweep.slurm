@@ -5,9 +5,10 @@
 #SBATCH --time 00:03:00
 
 ### set directory for job execution, replace the following path with your own path
-bin_path=~matthewmartin/ece569/proj/bin
+bin_path=~matthewmartin/ece569/proj/
 
-cd $bin_path
+### Run script from the path above using the following command line format
+###./bin/main ~/ece569/proj/source/GaB/IRISC_dv4_R050_L54_N1296_Dform IRISC_dv4_R050_L54_N1296_Dform_Res_cu 1 32 0 0
 ###
 
 
