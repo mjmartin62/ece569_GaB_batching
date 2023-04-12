@@ -102,6 +102,28 @@ __global__ void CheckPassGB(int *CtoV,int *VtoC,int M,int NbBranch,int *RowDegre
     }
 
 }
+
+__global__ void CheckPassGB(int *CtoV,int *VtoC,int M,int NbBranch,int *RowDegree, *numWords)
+{
+    int t,numB=0,i,signe;
+    // Calc relative global memory index where i spans multiple arrays for multiple words
+    i = threadIdx.x + blockIdx.x*blockDim.x;
+    // Calculate strided position for message arrays
+    numB = RowDegree * i;
+
+    // Conditional is boundary check
+    if (i < M*numWords) {
+        signe=0;
+        for (t=0;t<RowDegree;t++) 
+            signe^=VtoC[numB+t];
+        for (t=0;t<RowDegree;t++)   
+            CtoV[numB+t]=signe^VtoC[numB+t];
+    }
+
+    
+
+}
+
 //#####################################################################################################
 __global__ void APP_GB(int *Decide,int *CtoV,int *Receivedword,int *Interleaver,int *ColumnDegree,int N,int M,int NbBranch)
 {
