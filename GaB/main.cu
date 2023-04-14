@@ -180,10 +180,10 @@ int main(int argc, char * argv[])
   // Overrides for verification and testing runs
   // ----------------------------------------------------
   
-  alpha_max = 0.0400;
-  alpha_min= 0.0400;
-  alpha_step=0.0100;
-  NbMonteCarlo=10;
+  alpha_max = 0.00001;
+  alpha_min= 0.00001;
+  alpha_step=0.00001;
+  NbMonteCarlo=1;
   
   
   // ----------------------------------------------------
@@ -261,6 +261,7 @@ int main(int argc, char * argv[])
   int **CtoV,**VtoC,**Codeword,**Receivedword,**Decide,*U,l,kk;
   int numB;
   int RowDegreeConst, ColumnDegreeConst;
+  int **IsCodeword;
   int iter[Batch_size];
 
   RowDegreeConst = 8;
@@ -268,23 +269,28 @@ int main(int argc, char * argv[])
   
   CtoV=(int **)calloc(Batch_size,sizeof(int *));
   for (k=0;k<Batch_size;k++) 
-      CtoV[k]=(int *)calloc(numWords * NbBranch,sizeof(int));
+    CtoV[k]=(int *)calloc(numWords * NbBranch,sizeof(int));
   
   VtoC=(int **)calloc(Batch_size,sizeof(int *));
   for (k=0;k<Batch_size;k++) 
-      VtoC[k]=(int *)calloc(numWords *NbBranch,sizeof(int));
+    VtoC[k]=(int *)calloc(numWords *NbBranch,sizeof(int));
 
   Codeword=(int **)calloc(Batch_size,sizeof(int *));
   for (k=0;k<Batch_size;k++) 
-        Codeword[k]=(int *)calloc(numWords * N,sizeof(int));
+    Codeword[k]=(int *)calloc(numWords * N,sizeof(int));
 
   Receivedword=(int **)calloc(Batch_size,sizeof(int *));
   for (k=0;k<Batch_size;k++) 
-        Receivedword[k]=(int *)calloc(numWords * N,sizeof(int));
+    Receivedword[k]=(int *)calloc(numWords * N,sizeof(int));
 
   Decide=(int **)calloc(Batch_size,sizeof(int *));
   for (k=0;k<Batch_size;k++) 
-        Decide[k]=(int *)calloc(numWords * N,sizeof(int));
+    Decide[k]=(int *)calloc(numWords * N,sizeof(int));
+
+  IsCodeword=(int **)calloc(Batch_size,sizeof(int *));
+  for (k=0;k<Batch_size;k++)
+    IsCodeword[k]=(int *)calloc(numWords,sizeof(int));
+
  
   U=(int *)calloc(N,sizeof(int));
   srand48(time(0)+Graine*31+113);
@@ -393,7 +399,7 @@ int main(int argc, char * argv[])
   // DEV_CtoV is the CN to VN message array
   int *Dev_Receivedword[stream_count], *Dev_Decide[stream_count], *Dev_Syndrome[stream_count];
   int *Dev_VtoC[stream_count], *Dev_CtoV[stream_count];
-  int *IsCodeword[stream_count];
+
   
   // Allocate memory on the GPU for each stream
   for (int m=0; m<stream_count; m++) {
@@ -426,7 +432,7 @@ int main(int argc, char * argv[])
     //NbError=0;
 
     // Main loop for max number of codeword simulations per bit error rate
-    for (nb=0, nbtestedframes=0; nb<NbMonteCarlo; nb += Batch_size) {
+    for (nb=0, nbtestedframes=0; nb<NbMonteCarlo; nb += Batch_size*numWords) {
       
       // Fill codeword pseudo buffer
       CodewordBatchGenerator(Codeword, Receivedword, MatG, PermG, alpha, rank, N, U, Batch_size, numWords);
@@ -483,15 +489,18 @@ int main(int argc, char * argv[])
               //ComputeSyndrome <<< ceil(M*numWords/(float)Block_size), Block_size, 0, stream[k] >>> (Dev_Decide[k], Dev_Mat, Dev_RowDegree, M, Dev_Syndrome[k], numWords); 
               ComputeSyndrome <<< 1, numWords, 0, stream[k] >>> (Dev_Decide[k], Dev_Mat, RowDegreeConst, M, Dev_Syndrome[k], numWords); 
               
-              // Update host side memory for host controller decoder convergence check
+              // Update host side memory for host controller error correction convergence check
               cudaMemcpyAsync(IsCodeword[k], Dev_Syndrome[k],  numWords * sizeof(int), cudaMemcpyDeviceToHost, stream[k]);
-              // Update most recent decoded codeword copy to host memory (Most messages will recover with no iterations)
+              // Update most recent corrected codeword copy to host memory (Most messages will recover with no iterations)
               cudaMemcpyAsync(Decide[k], Dev_Decide[k], numWords * N * sizeof(int), cudaMemcpyDeviceToHost, stream[k]);
             }
           }
 
             // Sync Host and Device
             cudaDeviceSynchronize();
+
+          
+
 
           // Sync active streams for host side checks and updates
           for (int m=0; m<stream_count; m++) {
@@ -504,7 +513,12 @@ int main(int argc, char * argv[])
           // Check for codeword recovery and update stream states as neccissary
           for (int m=0; m<stream_count; m++) {
             if (stream_state[m] == 1) {
-              if (*IsCodeword[m]) {
+              
+              
+              // TMP CODE:  JUST CHECKING IF FIRST CW IS VALID!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+              printf("Codework check value for first CW in concatenated array =  %d  for Stream %d \n",IsCodeword[m][0],m);
+              if (IsCodeword[m][0]) {
+
               
                 // Update stream state array and kill stream
                 iter[m] = iter_batch;
@@ -512,22 +526,7 @@ int main(int argc, char * argv[])
                 cudaStreamDestroy(stream[m]);
                 // Debug code
                 // Print out number of iterations decoder took
-                //printf("Codework check value =  %d  for Stream %d recovered in %d runs \n",*IsCodeword[m],m,iter[m]);
-                
-                /*
-                for (int j=0; j<N; j++) {
-                  printf("%d ", Decide[m][j]);
-                }
-                printf("\n");
-                printf("\n");
-                */
-                 /*
-                printf("\n");
-                printf("\n");
-                for (int j=0; j<NbBranch; j++) {
-                  printf("%d ", VtoC[m][j]);
-                }         
-                */       
+                //printf("Codework check value =  %d  for Stream %d recovered in %d runs \n",*IsCodeword[m],m,iter[m]);   
               }
             }
           }
@@ -564,31 +563,45 @@ int main(int argc, char * argv[])
       //============================================================================
   	  // Verification:  Uncomment for short runs
 	    //============================================================================
-      /*
-      // Output uncorrupted codewords to file for verification purposes
-      FILE *fptr1;
-      fptr1 = (fopen("codewords_test_verification_pre_corrupt_02.txt", "a+"));
-      // send codeword to output file
-      for (k=0;k<N;k++) 
-        fprintf(fptr1, "%u %s", Codeword[k], "");
-      fprintf(fptr1, "%s", "\n");
-      fclose(fptr1);
-            
-      // Output decoded codewords to file for verification purposes
-      FILE *fptr2;
-      fptr2 = (fopen("codewords_test_verification_decoded_02.txt", "a+"));
-      // send codeword to output file
-      for (k=0;k<N;k++) 
-        fprintf(fptr2, "%u %s", Decide[k], "");
-      fprintf(fptr2, "%s", "\n");
-      fclose(fptr2);
-      */
-
-
-
       // Run H*CW syndrome check
-      //VerificationComputeSyndrome(Decide[bidx],Mat,RowDegree,M);
-      
+      // Outer loop is for checking each stream
+      // Inner loop is for checking the packed CWs within each stream
+      int *parsedDecideCW;
+      parsedDecideCW=(int *)calloc(1296,sizeof(int));
+      for (int countBatch=0; countBatch<stream_count; countBatch++) {
+          for (int countCW=0; countCW<numWords; countCW++){
+            
+            // Parse out CW and Error Corrected CW
+            for (int countBit=0; countBit<1296; countBit++) {
+              parsedDecideCW[countBit] = Decide[countBatch][countBit];
+            }
+            VerificationComputeSyndrome(parsedDecideCW,Mat,RowDegree,M);
+            
+            // Output uncorrupted codewords to file for verification purposes
+            
+            FILE *fptr1;
+            fptr1 = (fopen("codewords_test_verification_pre_corrupt_02.txt", "a+"));
+            // send codeword to output file
+            for (k=0;k<N;k++) 
+              fprintf(fptr1, "%u %s", Codeword[countBatch][k], "");
+            fprintf(fptr1, "%s", "\n");
+            fprintf(fptr1, "%s", "\n");
+            fprintf(fptr1, "%s", "\n");
+            fclose(fptr1);
+            
+
+            // Output decoded codewords to file for verification purposes
+            FILE *fptr2;
+            fptr2 = (fopen("codewords_test_verification_corrected_02.txt", "a+"));
+            // send codeword to output file
+            for (k=0;k<N;k++) 
+              fprintf(fptr2, "%u %s", parsedDecideCW[k], "");
+            fprintf(fptr2, "%s", "\n");
+            fprintf(fptr2, "%s", "\n");
+            fprintf(fptr2, "%s", "\n");
+            fclose(fptr2);
+          }
+      }
 
       
 	    //============================================================================

@@ -24,7 +24,7 @@ __global__ void DataPassGB(int *VtoC, int *CtoV, int *Receivedword, int *Interle
 	// Calc relative global memory index where n spans multiple concatenated arrays for multiple words
     n = threadIdx.x + blockIdx.x*blockDim.x;
     // Spaced position in interleaver matrix where modulo operation allows for multi word wrapping
-    numB = (ColumnDegree * n) % N;
+    numB = (ColumnDegree * n) % NbBranch;
 
     // Conditional is boundary check
     if (n < N*numWords) {
@@ -61,6 +61,7 @@ __global__ void CheckPassGB(int *CtoV,int *VtoC,int M,int NbBranch,int RowDegree
     m = threadIdx.x + blockIdx.x*blockDim.x;
     // Calculate strided position for message arrays
     numB = RowDegree * m;
+    
 
     // Conditional is boundary check
     if (m < M*numWords) {
@@ -69,6 +70,7 @@ __global__ void CheckPassGB(int *CtoV,int *VtoC,int M,int NbBranch,int RowDegree
             signe^=VtoC[numB+t];
         for (t=0;t<RowDegree;t++)   
             CtoV[numB+t]=signe^VtoC[numB+t];
+                        
     }
 }
 
@@ -81,7 +83,7 @@ __global__ void APP_GB(int *Decide,int *CtoV,int *Receivedword,int *Interleaver,
     // Calc relative global memory index where n spans multiple concatenated arrays for multiple words
     n = threadIdx.x + blockIdx.x*blockDim.x;
 	// Spaced position in interleaver matrix where modulo operation allows for multi word wrapping
-    numB = (ColumnDegree * n) % N;
+    numB = (ColumnDegree * n) % NbBranch;
     
     // Conditional is boundary check
     if (n < N*numWords) {
@@ -139,15 +141,16 @@ __global__ void ComputeSyndrome(int *Decide,int *Mat,int RowDegree,int M, int *D
     
 	for (k=0;k<M;k++) {
 		Synd=0;
-		for (l=0;l<RowDegree;l++) 
-            //Synd=Synd^Decide[Mat[k][l] + i];
+		for (l=0;l<RowDegree;l++) {
             Synd=Synd^Decide[Mat[k+l] + i];
-            //Synd=Synd^Decide[0];
-        if (Synd == 1)
-            break;
+
+            if (Synd == 1)
+                break;
+        }
     }
 
     // Update Syndrome tracker array; each entry in array is assigned to single CW syndrome result
-    Dev_Syndrome[i] = l-Synd;
+    Dev_Syndrome[threadIdx.x] = l-Synd;
+
 
 }
