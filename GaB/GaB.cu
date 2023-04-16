@@ -142,15 +142,16 @@ __global__ void ComputeSyndrome(int *Decide,int *Mat,int RowDegree,int M, int *D
 	for (k=0;k<M;k++) {
 		Synd=0;
 		for (l=0;l<RowDegree;l++) {
-            Synd=Synd^Decide[Mat[k+l] + i];
+            Synd=Synd^Decide[Mat[k*RowDegree+l] + i];
+            //printf("Kernel Internal Synd =  %d  \n",Synd);
 
-            if (Synd == 1)
-                break;
         }
+                    if (Synd == 1)
+                break;
     }
 
     // Update Syndrome tracker array; each entry in array is assigned to single CW syndrome result
-    Dev_Syndrome[threadIdx.x] = l-Synd;
+    Dev_Syndrome[threadIdx.x] = 1-Synd;
 
 
 }

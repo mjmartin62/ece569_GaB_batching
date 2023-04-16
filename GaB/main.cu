@@ -35,9 +35,10 @@ int VerificationComputeSyndrome(int *Decide,int **Mat,int *RowDegree,int M)
 	for (k=0;k<M;k++)
 	{
 		Synd=0;
-		for (l=0;l<RowDegree[k];l++) Synd=Synd^Decide[Mat[k][l]];
+		for (l=0;l<RowDegree[k];l++) 
+      Synd=Synd^Decide[Mat[k][l]];
 		if (Synd==1) {
-      printf("GPU Decoder failed decode process \n");
+      printf("GPU error correction failed correction process \n");
       break;
     }
 	}
@@ -180,10 +181,10 @@ int main(int argc, char * argv[])
   // Overrides for verification and testing runs
   // ----------------------------------------------------
   
-  alpha_max = 0.00001;
-  alpha_min= 0.00001;
-  alpha_step=0.00001;
-  NbMonteCarlo=1;
+  alpha_max = 0.004;
+  alpha_min= 0.004;
+  alpha_step=0.001;
+  NbMonteCarlo=10;
   
   
   // ----------------------------------------------------
@@ -357,30 +358,26 @@ int main(int argc, char * argv[])
     printf("data transfer error from host to device on Dev_Interleaver\n");
     return 0;
   }
-  //Copy column degree and row degree to Device 
-  /*
-  // TODO:  clean up constant transfer
-  int *colDegTmp;
-  colDegTmp[0] = 4;
-  if (cudaMemcpy(Dev_ColumnDegree, colDegTmp, sizeof(int), cudaMemcpyHostToDevice) != cudaSuccess){
-    printf("data transfer error from host to device on Dev_Interleaver\n");
-    return 0;
+
+  // Copy H-Matrix to Global memory 
+  // Flatten Matrix
+  int *Mat_flattened;
+  Mat_flattened = (int *)calloc(RowDegreeConst*M,sizeof(int));
+  for (int m=0; m<M; m++){
+    for (int r=0; r<RowDegreeConst; r++){
+      Mat_flattened[m*RowDegreeConst + r] = Mat[m][r];
+    }
+
   }
-  */
-  // TODO:  clean up constant transfer
+  cudaMemcpy(Dev_Mat, Mat_flattened, RowDegreeConst * M *sizeof(int), cudaMemcpyHostToDevice);
   /*
-  if (cudaMemcpy(Dev_RowDegree, rowDegTmp, sizeof(int), cudaMemcpyHostToDevice) != cudaSuccess){
-    printf("data transfer error from host to device on Dev_Interleaver\n");
-    return 0;
-  }
-  */
-  //Copy H-Matrix to Global memory 
   for (int i = 0; i < M ; i++) {
     if (cudaMemcpy((Dev_Mat+RowDegMax*i), *(Mat+i), RowDegMax * sizeof(int), cudaMemcpyHostToDevice) != cudaSuccess){
     printf("data transfer error from host to device on Dev_Mat\n");
     return 0;
     }
   }
+  */
 
   // ----------------------------------------------------
   // Stream based Device Memory allocations
@@ -468,13 +465,6 @@ int main(int argc, char * argv[])
           for (int k=0; k<stream_count; k++) {
             // Check if stream is still in active state
             if (stream_state[k] == 1){
-              
-              //debug code
-              /*
-              printf("Receivedword[0] is: %d \n",Receivedword[k][0]);
-              printf("Receivedword[1] is: %d \n",Receivedword[k][1]);
-              printf("Receivedword[2] is: %d \n",Receivedword[k][2]);
-              */
 
               // Update VN to CN message array
               DataPassGB <<< ceil(N*numWords/(float)Block_size), Block_size, 0, stream[k] >>> (Dev_VtoC[k], Dev_CtoV[k], Dev_Receivedword[k], Dev_Interleaver, ColumnDegreeConst, N, NbBranch, iter_batch, numWords);
@@ -506,8 +496,6 @@ int main(int argc, char * argv[])
           for (int m=0; m<stream_count; m++) {
             if (stream_state[m] == 1)
               cudaStreamSynchronize(stream[m]);
-              //cudaDeviceSynchronize();
-              //printf("In CHECK loop \n");
           }
 
           // Check for codeword recovery and update stream states as neccissary
@@ -517,7 +505,17 @@ int main(int argc, char * argv[])
               
               // TMP CODE:  JUST CHECKING IF FIRST CW IS VALID!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
               printf("Codework check value for first CW in concatenated array =  %d  for Stream %d \n",IsCodeword[m][0],m);
-              if (IsCodeword[m][0]) {
+
+              // Determine if batch of CWs in concatenated array are all valid
+              int concat_check = 1;
+              for (int k=0; k<numWords; k++) {
+                if (IsCodeword[m][k] == 0)
+                  concat_check = 0;
+                  break;
+              }
+
+
+              if (concat_check) {
 
               
                 // Update stream state array and kill stream
