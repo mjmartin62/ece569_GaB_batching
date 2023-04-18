@@ -9,10 +9,10 @@
 ### module load cuda11/11.0
 
 ### collect profile data
-nvprof --log-file profile.txt ./bin/main ~/ece569/proj/source/GaB/IRISC_dv4_R050_L54_N1296_Dform IRISC_dv4_R050_L54_N1296_Dform_Res_cu 10 32 0 0
-nvprof -f --metrics all -o nvvp_profile.nvvp ./bin/main ~/ece569/proj/source/GaB/IRISC_dv4_R050_L54_N1296_Dform IRISC_dv4_R050_L54_N1296_Dform_Res_cu 10 32 0 0
-nvprof -f -o profile.timeline ./bin/main ~/ece569/proj/source/GaB/IRISC_dv4_R050_L54_N1296_Dform IRISC_dv4_R050_L54_N1296_Dform_Res_cu 10 32 0 0
-nvprof -f -o profile.metrics --analysis-metrics ./bin/main ~/ece569/proj/source/GaB/IRISC_dv4_R050_L54_N1296_Dform IRISC_dv4_R050_L54_N1296_Dform_Res_cu 10 32 0 0
+nvprof --log-file profile.txt ./bin/main ~/ece569/proj/source/GaB/IRISC_dv4_R050_L54_N1296_Dform IRISC_dv4_R050_L54_N1296_Dform_Res_cu 10 32 100 0
+nvprof -f --metrics all -o nvvp_profile.nvvp ./bin/main ~/ece569/proj/source/GaB/IRISC_dv4_R050_L54_N1296_Dform IRISC_dv4_R050_L54_N1296_Dform_Res_cu 10 32 100 0
+nvprof -f -o profile.timeline ./bin/main ~/ece569/proj/source/GaB/IRISC_dv4_R050_L54_N1296_Dform IRISC_dv4_R050_L54_N1296_Dform_Res_cu 10 32 100 0
+nvprof -f -o profile.metrics --analysis-metrics ./bin/main ~/ece569/proj/source/GaB/IRISC_dv4_R050_L54_N1296_Dform IRISC_dv4_R050_L54_N1296_Dform_Res_cu 10 32 100 0
 
 ### Launch profiler
 nvvp $

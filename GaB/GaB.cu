@@ -1,16 +1,14 @@
-/* ###########################################################################################################################
+/* ########################################################################################################################
 ## Organization         : The University of Arizona
 ##                      :
-## File name            : GaB.c
+## File name            : GaB.cu
 ## Language             : C (ANSI)
 ## Short description    : Gallager-B Hard decision Bit-Flipping algorithm
 ##                      :
 ##                      :
 ##                      :
-## History              : Modified 19/01/2016, Created by Burak UNAL
-##                      :
-## COPYRIGHT            : burak@email.arizona.edu
-## ######################################################################################################################## */
+## History              : Modified 12/04/2023
+## ########################################################################################################################*/
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -18,110 +16,137 @@
 #include <unistd.h>
 
 //#####################################################################################################
-__global__ void DataPassGB(int *VtoC, int *CtoV, int *Receivedword, int *Interleaver,int *ColumnDegree,int N,int NbBranch, int iter)
+// Update VN to CN message array [Includes Multi Codeword Processing]
+__global__ void DataPassGB(int *VtoC, int *CtoV, int *Receivedword, int *Interleaver,int ColumnDegree,int N,int NbBranch, int iter, int numWords)
 {
 	int t,numB,n,buf;
 	int Global;
-	numB=0;
-	
+	// Calc relative global memory index where n spans multiple concatenated arrays for multiple words
+    n = threadIdx.x + blockIdx.x*blockDim.x;
+    // Spaced position in interleaver matrix where modulo operation allows for multi word wrapping
+    numB = (ColumnDegree * n) % NbBranch;
+    // Find which CW in concatenated array the thread is associated and calculate the offset for the concatenated array
+    int CW_offset = (n / N) * NbBranch;
+
+                    // DEBUG CODE
+            //if (n < N)
+             //  printf("CW offset = %d \n",CW_offset);
 
 
 
-        n = threadIdx.x + blockIdx.x*blockDim.x;
-
-    //debug code ####################################################################################
-    /*
-    if (n == 0) {
-        printf("VtoC[0] is: %d \n",VtoC[0]);
-        printf("VtoC[1] is: %d \n",VtoC[1]);
-        printf("VtoC[2] is: %d \n",VtoC[2]);
-        
-        printf("Receivedword[0] is: %d \n",Receivedword[0]);
-        printf("Receivedword[1] is: %d \n",Receivedword[1]);
-        printf("Receivedword[2] is: %d \n",Receivedword[2]);
-       
-        
-        }
-        */
-
-
-        numB = ColumnDegree[n] * n;
-    if (n < N) {
+    // Conditional is boundary check
+    if (n < N*numWords) {
         if (iter == 0) {
-              for (t=0;t<ColumnDegree[n];t++)     
-               VtoC[Interleaver[numB+t]]=Receivedword[n];
-
-
-
-
-
-        } else {
-        
-		       //Global=(Amplitude)*(1-2*ReceivedSymbol[n]);
-		       Global=(1-2*Receivedword[n]); 
-		       //Global=(1-2*(Decide[n] + Receivedword[n])); //Decide[n]^Receivedword[n];
-		       for (t=0;t<ColumnDegree[n];t++) Global+=(-2)*CtoV[Interleaver[numB+t]]+1;
-
-		       for (t=0;t<ColumnDegree[n];t++)
-		       {
-		            buf=Global-((-2)*CtoV[Interleaver[numB+t]]+1);
-		            if (buf<0)  VtoC[Interleaver[numB+t]]= 1; //else VtoC[Interleaver[numB+t]]= 1;
-		            else if (buf>0) VtoC[Interleaver[numB+t]]= 0; //else VtoC[Interleaver[numB+t]]= 1;
-		            else  VtoC[Interleaver[numB+t]]=Receivedword[n];
-		        }
-           }
-     }
-	
-}
-//#####################################################################################################
-//#####################################################################################################
-/*
-__global__ void DataPassGBIter0(int *Dev_VtoC,int *Dev_CtoV,int *Dev_Receivedword,int *Dev_Interleaver,int *Dev_ColumnDegree,int N,int NbBranch)
-{
-	int t,numB,buf;
-    int n = threadIdx.x + blockIdx.x*blockDim.x;
-     numB = Dev_ColumnDegree[n] * n;
-    // if(n > 1280) printf("\n %d and %d ", n , numB);
-     if (n < N) {
- 	   for (t=0;t<Dev_ColumnDegree[n];t++) {    
-        Dev_VtoC[Dev_Interleaver[numB+t]]=Dev_Receivedword[n];
+            for (t=0;t<ColumnDegree;t++)     
+               VtoC[Interleaver[numB+t] + CW_offset]=Receivedword[n];
         }
-     }
+        else {
+		    //Global=(Amplitude)*(1-2*ReceivedSymbol[n]);
+		    Global=(1-2*Receivedword[n]); 
+		    //Global=(1-2*(Decide[n] + Receivedword[n])); //Decide[n]^Receivedword[n];
+		    for (t=0;t<ColumnDegree;t++) 
+                Global+=(-2)*CtoV[Interleaver[numB+t] + CW_offset]+1;
+
+		    for (t=0;t<ColumnDegree;t++) {
+		        buf=Global-((-2)*CtoV[Interleaver[numB+t] + CW_offset]+1);
+		        if (buf<0)  
+                    VtoC[Interleaver[numB+t] + CW_offset]= 1; //else VtoC[Interleaver[numB+t]]= 1;
+		        else if (buf>0) 
+                    VtoC[Interleaver[numB+t] + CW_offset]= 0; //else VtoC[Interleaver[numB+t]]= 1;
+		        else  
+                    VtoC[Interleaver[numB+t] + CW_offset]=Receivedword[n];
+		    }
+        }
+    }
 }
-*/
 
 //##################################################################################################
-__global__ void CheckPassGB(int *CtoV,int *VtoC,int M,int NbBranch,int *RowDegree)
+// Update the CN to VN message array [Includes Multi Codeword Processing]
+__global__ void CheckPassGB(int *CtoV,int *VtoC,int M,int NbBranch,int RowDegree, int numWords)
 {
-   int t,numB=0,m,signe;
-   m = threadIdx.x + blockIdx.x*blockDim.x;
-   numB= RowDegree[m] * m;
-     if (m < M) {
-		signe=0;for (t=0;t<RowDegree[m];t++) signe^=VtoC[numB+t];
-	    for (t=0;t<RowDegree[m];t++) 	CtoV[numB+t]=signe^VtoC[numB+t];
-    }
+    int t,numB=0,m,signe;
+    // Calc relative global memory index where m spans multiple concatenated arrays for multiple words
+    m = threadIdx.x + blockIdx.x*blockDim.x;
+    // Calculate strided position for message arrays
+    numB = (RowDegree * m) % NbBranch;
+    // Find which CW in concatenated array the thread is associated and calculate the offset for the concatenated array
+    int CW_offset = (m / M) * NbBranch;
 
+
+    // Conditional is boundary check
+    if (m < M*numWords) {
+        signe=0;
+        for (t=0;t<RowDegree;t++) {
+            signe^=VtoC[numB+t + CW_offset];
+            
+
+        }
+
+        for (t=0;t<RowDegree;t++) {
+            
+            
+            CtoV[numB+t + CW_offset]=signe^VtoC[numB+t + CW_offset];
+            //if (m > M)
+            //  printf("Sample CtoV data = %d at global position %d \n",CtoV[numB+t + CW_offset],numB+t + CW_offset);
+
+        }
+
+        
+            // DEBUG CODE
+           // if (m > M)
+            //  printf("Sample CtoV data = %d \n",CtoV[CW_offset + m]);
+
+                        
+    }
 }
+
 //#####################################################################################################
-__global__ void APP_GB(int *Decide,int *CtoV,int *Receivedword,int *Interleaver,int *ColumnDegree,int N,int M,int NbBranch)
+//  Update the VN's [Includes Multi Codeword Processing]
+__global__ void APP_GB(int *Decide,int *CtoV,int *Receivedword,int *Interleaver,int ColumnDegree,int N,int M,int NbBranch, int numWords)
 {
    	int t,numB,n,buf;
 	int Global;
+    // Calc relative global memory index where n spans multiple concatenated arrays for multiple words
     n = threadIdx.x + blockIdx.x*blockDim.x;
-	numB=ColumnDegree[n] * n;
-    
+	// Spaced position in interleaver matrix where modulo operation allows for multi word wrapping
+    numB = (ColumnDegree * n) % NbBranch;
+    // Find which CW in concatenated array the thread is associated and calculate the offset for the concatenated array
+    int CW_offset = (n / N) * NbBranch;
 
-    if (n < N) {
+
+
+    
+    // Conditional is boundary check
+    if (n < N*numWords) {
 		Global=(1-2*Receivedword[n]);
-		for (t=0;t<ColumnDegree[n];t++) Global+=(-2)*CtoV[Interleaver[numB+t]]+1;
-        if(Global>0) Decide[n]= 0;
-        else if (Global<0) Decide[n]= 1;
-        else  Decide[n]=Receivedword[n];
+
+
+
+		for (t=0;t<ColumnDegree;t++) 
+            Global+=(-2)*CtoV[Interleaver[numB+t] + CW_offset]+1;
+
+            // DEBUG CODE
+            //if (n > N)
+             //   printf("Global value 2nd loc = %d \n",Global);
+
+
+        if(Global>0) 
+            Decide[n]= 0;
+        else if (Global<0) 
+            Decide[n]= 1;
+        else  
+            Decide[n]=Receivedword[n];
     }
 
+
 }
+
 //#####################################################################################################
-__global__ void ComputeSyndrome(int *Decide,int *Mat,int *RowDegree,int M, int *Dev_Syndrome)
+// Calculate Syndrome; determine if corrected word is valid codeword
+
+// This kernel is from the Single CW per kernel prototype 
+/*
+__global__ void ComputeSyndrome(int *Decide,int *Mat,int *RowDegree,int M, int *Dev_Syndrome, int numWords)
 {
 	int Synd,k,l;
     //This needs reduction function 
@@ -146,4 +171,31 @@ __global__ void ComputeSyndrome(int *Decide,int *Mat,int *RowDegree,int M, int *
      if (thd_id == 0 ) atomicMin(Dev_Syndrome, (1 - sh_Synd[0])); 
 
 }
+*/
 
+// This is a temp kernel w/o optimzation in mind
+__global__ void ComputeSyndrome(int *Decide,int *Mat,int RowDegree,int M, int *Dev_Syndrome, int numWords)
+{
+	int Synd,k,l,i;
+
+    // Single thread per CW Syndrome calculation
+    i = threadIdx.x * 1296;
+    
+	for (k=0;k<M;k++) {
+		Synd=0;
+		for (l=0;l<RowDegree;l++) {
+            Synd=Synd^Decide[Mat[k*RowDegree+l] + i];
+            //printf("Kernel Internal Synd =  %d  \n",Synd);
+
+        }
+        
+        if (Synd == 1)
+            break;
+
+    }
+
+    // Update Syndrome tracker array; each entry in array is assigned to single CW syndrome result
+    Dev_Syndrome[threadIdx.x] = 1-Synd;
+
+
+}

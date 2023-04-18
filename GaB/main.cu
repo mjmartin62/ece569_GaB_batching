@@ -35,9 +35,11 @@ int VerificationComputeSyndrome(int *Decide,int **Mat,int *RowDegree,int M)
 	for (k=0;k<M;k++)
 	{
 		Synd=0;
-		for (l=0;l<RowDegree[k];l++) Synd=Synd^Decide[Mat[k][l]];
+		for (l=0;l<RowDegree[k];l++) 
+      Synd=Synd^Decide[Mat[k][l]];
+
 		if (Synd==1) {
-      printf("GPU Decoder failed decode process \n");
+      printf("GPU error correction failed correction process \n");
       break;
     }
 	}
@@ -45,26 +47,33 @@ int VerificationComputeSyndrome(int *Decide,int **Mat,int *RowDegree,int M)
 }
 
 // Codeword generator Function (Batch Processing) #####################################################
-int CodewordBatchGenerator(int **Codeword, int **Receivedword, int **MatG, int *PermG, float alpha, int rank, int N, int *U, int Batch_size) 
+int CodewordBatchGenerator(int **Codeword, int **Receivedword, int **MatG, int *PermG, float alpha, int rank, int N, int *U, int Batch_size, int numWords) 
 {
   int k, l, n;
   int bidx;
   
+  // Outer loop is for each set of CWs packed into single 1D array
   for (bidx=0; bidx<Batch_size; bidx++){
-    // Random generation and Encoding process
-    for (k=0;k<rank;k++) 
-      U[k]=0;
-	  for (k=rank;k<N;k++) 
-      U[k]=floor(drand48()*2);
-	  for (k=rank-1;k>=0;k--) { 
-      for (l=k+1;l<N;l++) 
-        U[k]=U[k]^(MatG[k][l]*U[l]); 
+    
+    // Inner loop is for each CW
+    // Initialize the relative position within the packed array to 0 then index by size of CW
+    for (int packLoc = 0; packLoc < numWords * N; packLoc += N) {
+      // Random generation and Encoding process
+      for (k=0;k<rank;k++) 
+        U[k] = 0;
+	    for (k=rank;k<N;k++) 
+        U[k] = floor(drand48()*2);
+	    for (k=rank-1;k>=0;k--) { 
+        for (l=k+1;l<N;l++) 
+          U[k] = U[k]^(MatG[k][l]*U[l]); 
+      }
+	    for (k=0;k<N;k++) 
+        Codeword[bidx][PermG[k]+ packLoc] = U[k];
     }
-	  for (k=0;k<N;k++) 
-      Codeword[bidx][PermG[k]]=U[k];
 
-    // Add Noise and assign possibly corrupted Codeword to Receivedword
-    for (n=0;n<N;n++)  
+
+    // Add Noise across the packed CW 1D array and assign possibly corrupted set of Codewords to set of Receivedwords
+    for (n=0; n<N*numWords; n++)  
       if (drand48()<alpha) 
         Receivedword[bidx][n]=1-Codeword[bidx][n]; 
       else 
@@ -74,22 +83,16 @@ int CodewordBatchGenerator(int **Codeword, int **Receivedword, int **MatG, int *
   return 0;
 }
 
-
-
-
 //#####################################################################################################
 int GaussianElimination_MRB(int *Perm,int **MatOut,int **Mat,int M,int N)
 {
 	int k,n,m,m1,buf,ind,indColumn,nb,*Index,dep,Rank;
-
 	Index=(int *)calloc(N,sizeof(int));
-
 	// Triangularization
 	indColumn=0;nb=0;dep=0;
 	for (m=0;m<M;m++)
 	{
 		if (indColumn==N) { dep=M-m; break; }
-
 		for (ind=m;ind<M;ind++) { if (Mat[ind][indColumn]!=0) break; }
 		// If a "1" is found on the column, permutation of rows
 		if (ind<M)
@@ -104,17 +107,12 @@ int GaussianElimination_MRB(int *Perm,int **MatOut,int **Mat,int M,int N)
 		}
 		// else we "mark" the column.
 		else { Index[nb++]=indColumn; m--; }
-
 		indColumn++;
 	}
-
 	Rank=M-dep;
-
 	for (n=0;n<nb;n++) Perm[Rank+n]=Index[n];
-
 	// Permutation of the matrix
 	for (m=0;m<M;m++) { for (n=0;n<N;n++) MatOut[m][n]=Mat[m][Perm[n]]; }
-
 	// Diagonalization
 	for (m=0;m<(Rank-1);m++)
 	{
@@ -141,17 +139,13 @@ int main(int argc, char * argv[])
   // ----------------------------------------------------
   int Batch_size = std::stoi(argv[3]);
   int Block_size = std::stoi(argv[4]);
-  int reserved_5 = std::stoi(argv[5]);
+  int numWords = std::stoi(argv[5]);
   int reserved_6 = std::stoi(argv[6]);
   /*
   printf("----------------------------------------\n");
   printf("Block size test: ");
   printf("%6d\n", block_size);
-  */
-  // Recast block size
-  //dim3 Block_size;
-  //Block_size = dim3(Block_size_input, 1,1);
-  
+  */  
   
   // Variables Declaration
   FILE *f;
@@ -188,10 +182,9 @@ int main(int argc, char * argv[])
   // Overrides for verification and testing runs
   // ----------------------------------------------------
   
-  alpha_max = 0.0400;
-  alpha_min= 0.0400;
-  alpha_step=0.0100;
-  
+  alpha_max = 0.02;
+  alpha_min=  0.02;
+  alpha_step=0.001;
   NbMonteCarlo=10;
   
   
@@ -269,30 +262,38 @@ int main(int argc, char * argv[])
   // ----------------------------------------------------
   int **CtoV,**VtoC,**Codeword,**Receivedword,**Decide,*U,l,kk;
   int numB;
+  int RowDegreeConst, ColumnDegreeConst;
+  int **IsCodeword;
   int iter[Batch_size];
+
+  RowDegreeConst = 8;
+  ColumnDegreeConst = 4;
   
   CtoV=(int **)calloc(Batch_size,sizeof(int *));
   for (k=0;k<Batch_size;k++) 
-      CtoV[k]=(int *)calloc(NbBranch,sizeof(int));
+    CtoV[k]=(int *)calloc(numWords * NbBranch,sizeof(int));
   
   VtoC=(int **)calloc(Batch_size,sizeof(int *));
   for (k=0;k<Batch_size;k++) 
-      VtoC[k]=(int *)calloc(NbBranch,sizeof(int));
-
+    VtoC[k]=(int *)calloc(numWords *NbBranch,sizeof(int));
 
   Codeword=(int **)calloc(Batch_size,sizeof(int *));
   for (k=0;k<Batch_size;k++) 
-        Codeword[k]=(int *)calloc(N,sizeof(int));
+    Codeword[k]=(int *)calloc(numWords * N,sizeof(int));
 
   Receivedword=(int **)calloc(Batch_size,sizeof(int *));
   for (k=0;k<Batch_size;k++) 
-        Receivedword[k]=(int *)calloc(N,sizeof(int));
+    Receivedword[k]=(int *)calloc(numWords * N,sizeof(int));
 
   Decide=(int **)calloc(Batch_size,sizeof(int *));
   for (k=0;k<Batch_size;k++) 
-        Decide[k]=(int *)calloc(N,sizeof(int));
+    Decide[k]=(int *)calloc(numWords * N,sizeof(int));
+
+  IsCodeword=(int **)calloc(Batch_size,sizeof(int *));
+  for (k=0;k<Batch_size;k++)
+    IsCodeword[k]=(int *)calloc(numWords,sizeof(int));
+
  
-  
   U=(int *)calloc(N,sizeof(int));
   srand48(time(0)+Graine*31+113);
 
@@ -315,8 +316,8 @@ int main(int argc, char * argv[])
   int Dmin;
   int NbTotalErrors,NbBitError;
   int NbUnDetectedErrors,NbError[Batch_size];
-  int *energy;
-  energy=(int *)calloc(N,sizeof(int));
+  // int *energy;
+  //energy=(int *)calloc(N,sizeof(int));
 
   strcpy(FileName,FileResult);
   f=fopen(FileName,"w");
@@ -337,11 +338,11 @@ int main(int argc, char * argv[])
     printf("malloc error for *Dev_Interleaver \n");
     return 0;
   }
-  if (cudaMalloc((void **) &Dev_ColumnDegree, N * sizeof(int)) != cudaSuccess) {
-    printf("malloc error for *Dev_Interleaver \n");
+  if (cudaMalloc((void **) &Dev_ColumnDegree, sizeof(int)) != cudaSuccess) {
+    printf("malloc error for *Col_Degree \n");
     return 0;
   }
-  if (cudaMalloc((void **) &Dev_RowDegree, M * sizeof(int)) != cudaSuccess) {
+  if (cudaMalloc((void **) &Dev_RowDegree, sizeof(int)) != cudaSuccess) {
     printf("malloc error for *Dev_RowDegree \n");
     return 0;
   }
@@ -358,22 +359,26 @@ int main(int argc, char * argv[])
     printf("data transfer error from host to device on Dev_Interleaver\n");
     return 0;
   }
-  //Copy column degree and row degree to Device 
-  if (cudaMemcpy(Dev_ColumnDegree, ColumnDegree, N * sizeof(int), cudaMemcpyHostToDevice) != cudaSuccess){
-    printf("data transfer error from host to device on Dev_Interleaver\n");
-    return 0;
+
+  // Copy H-Matrix to Global memory 
+  // Flatten Matrix
+  int *Mat_flattened;
+  Mat_flattened = (int *)calloc(RowDegreeConst*M,sizeof(int));
+  for (int m=0; m<M; m++){
+    for (int r=0; r<RowDegreeConst; r++){
+      Mat_flattened[m*RowDegreeConst + r] = Mat[m][r];
+    }
+
   }
-  if (cudaMemcpy(Dev_RowDegree, RowDegree, M * sizeof(int), cudaMemcpyHostToDevice) != cudaSuccess){
-    printf("data transfer error from host to device on Dev_Interleaver\n");
-    return 0;
-  }
-  //Copy H-Matrix to Global memory 
+  cudaMemcpy(Dev_Mat, Mat_flattened, RowDegreeConst * M *sizeof(int), cudaMemcpyHostToDevice);
+  /*
   for (int i = 0; i < M ; i++) {
     if (cudaMemcpy((Dev_Mat+RowDegMax*i), *(Mat+i), RowDegMax * sizeof(int), cudaMemcpyHostToDevice) != cudaSuccess){
     printf("data transfer error from host to device on Dev_Mat\n");
     return 0;
     }
   }
+  */
 
   // ----------------------------------------------------
   // Stream based Device Memory allocations
@@ -392,27 +397,27 @@ int main(int argc, char * argv[])
   // DEV_CtoV is the CN to VN message array
   int *Dev_Receivedword[stream_count], *Dev_Decide[stream_count], *Dev_Syndrome[stream_count];
   int *Dev_VtoC[stream_count], *Dev_CtoV[stream_count];
-  int *IsCodeword[stream_count];
+
   
   // Allocate memory on the GPU for each stream
   for (int m=0; m<stream_count; m++) {
-    cudaMalloc((void **) &Dev_Receivedword[m], N * sizeof(int));
-    cudaMalloc((void **) &Dev_Decide[m], N * sizeof(int));
-    cudaMalloc((void **) &Dev_Syndrome[m], sizeof(int));
-    cudaMalloc((void **) &Dev_VtoC[m], NbBranch * sizeof(int));
-    cudaMalloc((void **) &Dev_CtoV[m], NbBranch * sizeof(int));
+    cudaMalloc((void **) &Dev_Receivedword[m], numWords * N * sizeof(int));
+    cudaMalloc((void **) &Dev_Decide[m], numWords * N * sizeof(int));
+    cudaMalloc((void **) &Dev_Syndrome[m], numWords * sizeof(int));
+    cudaMalloc((void **) &Dev_VtoC[m], numWords * NbBranch * sizeof(int));
+    cudaMalloc((void **) &Dev_CtoV[m], numWords * NbBranch * sizeof(int));
   }
 
   // Assign host side pinned memory where each word and initialized message arrays will be assigned to a stream
   for (int m=0; m<stream_count; m++) {
 
-    cudaHostAlloc((void**) &Receivedword[m], N * sizeof(int), cudaHostAllocDefault);
-    cudaHostAlloc((void**) &Decide[m], N * sizeof(int), cudaHostAllocDefault);
-    cudaHostAlloc((void**) &IsCodeword[m], sizeof(int), cudaHostAllocDefault);
+    cudaHostAlloc((void**) &Receivedword[m], numWords * N * sizeof(int), cudaHostAllocDefault);
+    cudaHostAlloc((void**) &Decide[m], numWords * N * sizeof(int), cudaHostAllocDefault);
+    cudaHostAlloc((void**) &IsCodeword[m], numWords * sizeof(int), cudaHostAllocDefault);
     
     // MIGHT BE ABLE TO INITIALIZE THESE ONCE SINCE THEY ARE THE SAME FOR EACH BATCH LAUNCH!!!!!!!!!!!!!!!!!!!!!
-    cudaHostAlloc((void**) &VtoC[m], NbBranch * sizeof(int), cudaHostAllocDefault);
-    cudaHostAlloc((void**) &CtoV[m], NbBranch * sizeof(int), cudaHostAllocDefault);
+    cudaHostAlloc((void**) &VtoC[m], numWords * NbBranch * sizeof(int), cudaHostAllocDefault);
+    cudaHostAlloc((void**) &CtoV[m], numWords * NbBranch * sizeof(int), cudaHostAllocDefault);
   }
 
 
@@ -425,10 +430,11 @@ int main(int argc, char * argv[])
     //NbError=0;
 
     // Main loop for max number of codeword simulations per bit error rate
-    for (nb=0, nbtestedframes=0; nb<NbMonteCarlo; nb += Batch_size) {
+    for (nb=0, nbtestedframes=0; nb<NbMonteCarlo; nb += Batch_size*numWords) {
       
       // Fill codeword pseudo buffer
-      CodewordBatchGenerator(Codeword, Receivedword, MatG, PermG, alpha, rank, N, U, Batch_size);
+      CodewordBatchGenerator(Codeword, Receivedword, MatG, PermG, alpha, rank, N, U, Batch_size, numWords);
+
 
       // Initialize stream state array (1 = not complete, 0 = complete)
       // and batch state detector
@@ -445,26 +451,13 @@ int main(int argc, char * argv[])
         cudaStreamCreate(&stream[m]);
       }
 
-      // Stream corrupted codeword and message arrays from pinned host memory to device
+      // Stream corrupted set of codewords from pinned host memory to device
       for (int m=0; m<stream_count; m++) {
-        
-        
-
-        if(cudaMemcpyAsync(Dev_Receivedword[m], Receivedword[m], N * sizeof(int), cudaMemcpyHostToDevice, stream[m]) != cudaSuccess){
+        if(cudaMemcpyAsync(Dev_Receivedword[m], Receivedword[m], numWords * N * sizeof(int), cudaMemcpyHostToDevice, stream[m]) != cudaSuccess){
           printf("Mem tx issue \n");
         }
-        
-        
-        // I'm commenting the following out since syndrome does not need to be initialized with any particular value for kernel
-        //cudaMemcpyAsync(Dev_Decide[m], Decide[m], N * sizeof(int), cudaMemcpyHostToDevice, stream[m]);
-        //cudaMemcpyAsync(Dev_Syndrome[m], Syndrome[m], sizeof(int), cudaMemcpyHostToDevice, stream[m]);
-
-        //cudaMemcpyAsync(Dev_VtoC[m], VtoC[m], NbBranch * sizeof(int), cudaMemcpyHostToDevice, stream[m]);
-        //cudaMemcpyAsync(Dev_CtoV[m], CtoV[m], NbBranch * sizeof(int), cudaMemcpyHostToDevice, stream[m]);
       }
 
-            // Sync Host and Device
-            //cudaDeviceSynchronize();
 
       // Outer loop dependant upon all the batch states and max number of allowable decode iterations
       while (batch_state == 1 && iter_batch < NbIter) {
@@ -473,77 +466,73 @@ int main(int argc, char * argv[])
           for (int k=0; k<stream_count; k++) {
             // Check if stream is still in active state
             if (stream_state[k] == 1){
-              
-              //debug code
-              /*
-              printf("Receivedword[0] is: %d \n",Receivedword[k][0]);
-              printf("Receivedword[1] is: %d \n",Receivedword[k][1]);
-              printf("Receivedword[2] is: %d \n",Receivedword[k][2]);
-              */
 
-
-              
               // Update VN to CN message array
-              DataPassGB <<< ceil(N/(float)Block_size), Block_size, 0, stream[k] >>> (Dev_VtoC[k], Dev_CtoV[k], Dev_Receivedword[k], Dev_Interleaver, Dev_ColumnDegree, N, NbBranch, iter_batch);  
-
-
-
+              DataPassGB <<< ceil(N*numWords/(float)Block_size), Block_size, 0, stream[k] >>> (Dev_VtoC[k], Dev_CtoV[k], Dev_Receivedword[k], Dev_Interleaver, ColumnDegreeConst, N, NbBranch, iter_batch, numWords);
+              
               // Update the CN to VN message array
-              CheckPassGB<<< ceil(M/(float)Block_size), Block_size, 0, stream[k] >>> (Dev_CtoV[k], Dev_VtoC[k], M, NbBranch, Dev_RowDegree); 
+              CheckPassGB<<< ceil(M*numWords/(float)Block_size), Block_size, 0, stream[k] >>> (Dev_CtoV[k], Dev_VtoC[k], M, NbBranch, RowDegreeConst, numWords); 
+
               //  Update the VN's (VN's are stored in the Decide array)
-              APP_GB  <<< ceil(N/(float)Block_size), Block_size, 0, stream[k] >>> (Dev_Decide[k], Dev_CtoV[k], Dev_Receivedword[k], Dev_Interleaver, Dev_ColumnDegree, N, M, NbBranch); 
+              APP_GB  <<< ceil(N*numWords/(float)Block_size), Block_size, 0, stream[k] >>> (Dev_Decide[k], Dev_CtoV[k], Dev_Receivedword[k], Dev_Interleaver, ColumnDegreeConst, N, M, NbBranch, numWords); 
+              
               // Check to see if updated codeword has been recovered
-              ComputeSyndrome <<< ceil(M/(float)Block_size), Block_size, 0, stream[k] >>> (Dev_Decide[k], Dev_Mat, Dev_RowDegree, M, Dev_Syndrome[k]); 
-              // Update host side memory for host controller decoder convergence check
-              cudaMemcpyAsync(IsCodeword[k], Dev_Syndrome[k],  sizeof(int), cudaMemcpyDeviceToHost, stream[k]);
-              // Update most recent decoded codeword copy to host memory (Most messages will recover with no iterations)
-              cudaMemcpyAsync(Decide[k], Dev_Decide[k], N * sizeof(int), cudaMemcpyDeviceToHost, stream[k]);
+              //ComputeSyndrome <<< ceil(M*numWords/(float)Block_size), Block_size, 0, stream[k] >>> (Dev_Decide[k], Dev_Mat, Dev_RowDegree, M, Dev_Syndrome[k], numWords); 
+              ComputeSyndrome <<< 1, numWords, 0, stream[k] >>> (Dev_Decide[k], Dev_Mat, RowDegreeConst, M, Dev_Syndrome[k], numWords); 
+              
+              // Update host side memory for host controller error correction convergence check
+              cudaMemcpyAsync(IsCodeword[k], Dev_Syndrome[k],  numWords * sizeof(int), cudaMemcpyDeviceToHost, stream[k]);
+              // Update most recent corrected codeword copy to host memory (Most messages will recover with no iterations)
+              cudaMemcpyAsync(Decide[k], Dev_Decide[k], numWords * N * sizeof(int), cudaMemcpyDeviceToHost, stream[k]);
             }
           }
 
             // Sync Host and Device
             cudaDeviceSynchronize();
 
+          
+
+
           // Sync active streams for host side checks and updates
           for (int m=0; m<stream_count; m++) {
             if (stream_state[m] == 1)
               cudaStreamSynchronize(stream[m]);
-              //cudaDeviceSynchronize();
-              //printf("In CHECK loop \n");
           }
 
           // Check for codeword recovery and update stream states as neccissary
           for (int m=0; m<stream_count; m++) {
             if (stream_state[m] == 1) {
-              if (*IsCodeword[m]) {
               
+              
+              // TMP CODE:  Verification !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+              
+              printf("Checking iteration %d \n",iter_batch);
+              for (int b=0; b<numWords; b++){
+                printf("Codework check value for CW # %d in concatenated array =  %d  for Stream %d \n",b,IsCodeword[m][b],m);
+              }
+              
+              // TMP CODE:  Verification !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+              // Determine if batch of CWs in concatenated array are all valid
+              // Perform Multi CW concatenated array check
+              int concat_check = 1;
+              for (int k=0; k<numWords; k++) {
+                if (IsCodeword[m][k] == 0) {
+                  concat_check = 0;
+                  break;
+                }
+              }
+              // Kill stream if all CWs in concatenated array are recovered
+              if (concat_check == 1) {
                 // Update stream state array and kill stream
                 iter[m] = iter_batch;
                 stream_state[m] = 0;
                 cudaStreamDestroy(stream[m]);
-                // Debug code
-                // Print out number of iterations decoder took
-                //printf("Codework check value =  %d  for Stream %d recovered in %d runs \n",*IsCodeword[m],m,iter[m]);
-                
-                /*
-                for (int j=0; j<N; j++) {
-                  printf("%d ", Decide[m][j]);
-                }
-                printf("\n");
-                printf("\n");
-                */
-                 /*
-                printf("\n");
-                printf("\n");
-                for (int j=0; j<NbBranch; j++) {
-                  printf("%d ", VtoC[m][j]);
-                }         
-                */       
               }
             }
           }
 
-          // Update batch tracking variables for next round of streams
+          // Update stream batch tracking variables for next round of streams
           iter_batch++;
           int state_check = 0;
           batch_state = 0;
@@ -575,36 +564,63 @@ int main(int argc, char * argv[])
       //============================================================================
   	  // Verification:  Uncomment for short runs
 	    //============================================================================
-      /*
-      // Output uncorrupted codewords to file for verification purposes
-      FILE *fptr1;
-      fptr1 = (fopen("codewords_test_verification_pre_corrupt_02.txt", "a+"));
-      // send codeword to output file
-      for (k=0;k<N;k++) 
-        fprintf(fptr1, "%u %s", Codeword[k], "");
-      fprintf(fptr1, "%s", "\n");
-      fclose(fptr1);
-            
-      // Output decoded codewords to file for verification purposes
-      FILE *fptr2;
-      fptr2 = (fopen("codewords_test_verification_decoded_02.txt", "a+"));
-      // send codeword to output file
-      for (k=0;k<N;k++) 
-        fprintf(fptr2, "%u %s", Decide[k], "");
-      fprintf(fptr2, "%s", "\n");
-      fclose(fptr2);
-      */
-
-
-
       // Run H*CW syndrome check
-      //VerificationComputeSyndrome(Decide[bidx],Mat,RowDegree,M);
-      
+      // Outer loop is for checking each stream
+      // Inner loop is for checking the packed CWs within each stream
+      /*
+      int *parsedDecideCW;
+      parsedDecideCW=(int *)calloc(1296,sizeof(int));
+      for (int countBatch=0; countBatch<stream_count; countBatch++) {
+          for (int countCW=0; countCW<numWords; countCW++){
+            
+            // Parse out CW and Error Corrected CW
+            for (int countBit=0; countBit<1296; countBit++) {
+              parsedDecideCW[countBit] = Decide[countBatch][countBit + countCW*N];
+            }
+            VerificationComputeSyndrome(parsedDecideCW,Mat,RowDegree,M);
+            
+            // Output uncorrupted codewords to file for verification purposes
+            
+            FILE *fptr1;
+            fptr1 = (fopen("codewords_test_verification_pre_corrupt_02.txt", "a+"));
+            // send codeword to output file
+            for (k=0;k<N;k++) 
+              fprintf(fptr1, "%u %s", Codeword[countBatch][k + countCW*N], "");
+            fprintf(fptr1, "%s", "\n");
+            fprintf(fptr1, "%s", "\n");
+            fprintf(fptr1, "%s", "\n");
+            fclose(fptr1);
+            
 
+            // Output corrected codewords to file for verification purposes
+            FILE *fptr2;
+            fptr2 = (fopen("codewords_test_verification_corrected_02.txt", "a+"));
+            // send codeword to output file
+            for (k=0;k<N;k++) 
+              fprintf(fptr2, "%u %s", parsedDecideCW[k], "");
+            fprintf(fptr2, "%s", "\n");
+            fprintf(fptr2, "%s", "\n");
+            fprintf(fptr2, "%s", "\n");
+            fclose(fptr2);
+
+            // Output message arrays to file for verification purposes
+            FILE *fptr3;
+            fptr3 = (fopen("CtoV_test_verification_02.txt", "a+"));
+            // send codeword to output file
+            for (k=0;k<NbBranch;k++) 
+              fprintf(fptr3, "%u %s", CtoV[countBatch][k + countCW*NbBranch], "");
+            fprintf(fptr3, "%s", "\n");
+            fprintf(fptr3, "%s", "\n");
+            fprintf(fptr3, "%s", "\n");
+            fclose(fptr3);
+          }
+      }
+      */
       
 	    //============================================================================
   	  // Batch Compute Statistics
 	    //============================================================================
+      /*
       // update number of tested messages (aka frames)
       nbtestedframes += Batch_size;
 
@@ -646,7 +662,8 @@ int main(int argc, char * argv[])
 	      }
       
       }
-      
+      */
+
       // Stopping Criterion 
 	    if (NbTotalErrors >= NBframes) 
         break;
@@ -654,7 +671,7 @@ int main(int argc, char * argv[])
     }
     
     // Print final statistics for each alpha setting
-
+    /*
     printf("%1.5f\t\t",alpha);
     printf("%10d (%1.16f)\t\t",NbBitError,(float)NbBitError/N/nbtestedframes);
     printf("%4d (%1.16f)\t\t",NbTotalErrors,(float)NbTotalErrors/nbtestedframes);
@@ -668,6 +685,7 @@ int main(int argc, char * argv[])
     fprintf(f,"%10d\t\t",nbtestedframes);
     fprintf(f,"%1.2f(%d)\t\t",(float)NiterMoy/nbtestedframes,NiterMax);
     fprintf(f,"%d(%d)\n",NbUnDetectedErrors,Dmin);
+    */
     
   }
 
