@@ -37,6 +37,7 @@ int VerificationComputeSyndrome(int *Decide,int **Mat,int *RowDegree,int M)
 		Synd=0;
 		for (l=0;l<RowDegree[k];l++) 
       Synd=Synd^Decide[Mat[k][l]];
+
 		if (Synd==1) {
       printf("GPU error correction failed correction process \n");
       break;
@@ -181,8 +182,8 @@ int main(int argc, char * argv[])
   // Overrides for verification and testing runs
   // ----------------------------------------------------
   
-  alpha_max = 0.004;
-  alpha_min= 0.004;
+  alpha_max = 0.02;
+  alpha_min=  0.02;
   alpha_step=0.001;
   NbMonteCarlo=10;
   
@@ -471,7 +472,15 @@ int main(int argc, char * argv[])
               
               // Update the CN to VN message array
               CheckPassGB<<< ceil(M*numWords/(float)Block_size), Block_size, 0, stream[k] >>> (Dev_CtoV[k], Dev_VtoC[k], M, NbBranch, RowDegreeConst, numWords); 
+
+
+              // Debug code !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+              cudaMemcpyAsync(CtoV[k], Dev_CtoV[k],  numWords * NbBranch * sizeof(int), cudaMemcpyDeviceToHost, stream[k]);
+              cudaDeviceSynchronize();
+              // Debug code !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
               
+
               //  Update the VN's (VN's are stored in the Decide array)
               APP_GB  <<< ceil(N*numWords/(float)Block_size), Block_size, 0, stream[k] >>> (Dev_Decide[k], Dev_CtoV[k], Dev_Receivedword[k], Dev_Interleaver, ColumnDegreeConst, N, M, NbBranch, numWords); 
               
@@ -503,21 +512,23 @@ int main(int argc, char * argv[])
             if (stream_state[m] == 1) {
               
               
-              // TMP CODE:  JUST CHECKING IF FIRST CW IS VALID!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-              printf("Codework check value for first CW in concatenated array =  %d  for Stream %d \n",IsCodeword[m][0],m);
-
-              // Determine if batch of CWs in concatenated array are all valid
-              int concat_check = 1;
-              for (int k=0; k<numWords; k++) {
-                if (IsCodeword[m][k] == 0)
-                  concat_check = 0;
-                  break;
+              // TMP CODE:  JUST CHECKING IF CW are VALID!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+              printf("Checking iteration %d \n",iter_batch);
+              for (int b=0; b<numWords; b++){
+                printf("Codework check value for CW # %d in concatenated array =  %d  for Stream %d \n",b,IsCodeword[m][b],m);
               }
 
-
-              if (concat_check) {
-
-              
+              // Determine if batch of CWs in concatenated array are all valid
+              // Perform Multi CW concatenated array check
+              int concat_check = 1;
+              for (int k=0; k<numWords; k++) {
+                if (IsCodeword[m][k] == 0) {
+                  concat_check = 0;
+                  break;
+                }
+              }
+              // Kill stream if all CWs in concatenated array are recovered
+              if (concat_check == 1) {
                 // Update stream state array and kill stream
                 iter[m] = iter_batch;
                 stream_state[m] = 0;
@@ -529,7 +540,7 @@ int main(int argc, char * argv[])
             }
           }
 
-          // Update batch tracking variables for next round of streams
+          // Update stream batch tracking variables for next round of streams
           iter_batch++;
           int state_check = 0;
           batch_state = 0;
@@ -571,7 +582,7 @@ int main(int argc, char * argv[])
             
             // Parse out CW and Error Corrected CW
             for (int countBit=0; countBit<1296; countBit++) {
-              parsedDecideCW[countBit] = Decide[countBatch][countBit];
+              parsedDecideCW[countBit] = Decide[countBatch][countBit + countCW*N];
             }
             VerificationComputeSyndrome(parsedDecideCW,Mat,RowDegree,M);
             
@@ -581,14 +592,14 @@ int main(int argc, char * argv[])
             fptr1 = (fopen("codewords_test_verification_pre_corrupt_02.txt", "a+"));
             // send codeword to output file
             for (k=0;k<N;k++) 
-              fprintf(fptr1, "%u %s", Codeword[countBatch][k], "");
+              fprintf(fptr1, "%u %s", Codeword[countBatch][k + countCW*N], "");
             fprintf(fptr1, "%s", "\n");
             fprintf(fptr1, "%s", "\n");
             fprintf(fptr1, "%s", "\n");
             fclose(fptr1);
             
 
-            // Output decoded codewords to file for verification purposes
+            // Output corrected codewords to file for verification purposes
             FILE *fptr2;
             fptr2 = (fopen("codewords_test_verification_corrected_02.txt", "a+"));
             // send codeword to output file
@@ -598,6 +609,19 @@ int main(int argc, char * argv[])
             fprintf(fptr2, "%s", "\n");
             fprintf(fptr2, "%s", "\n");
             fclose(fptr2);
+
+            // Output message arrays to file for verification purposes
+            FILE *fptr3;
+            fptr3 = (fopen("CtoV_test_verification_02.txt", "a+"));
+            // send codeword to output file
+            for (k=0;k<NbBranch;k++) 
+              fprintf(fptr3, "%u %s", CtoV[countBatch][k + countCW*NbBranch], "");
+            fprintf(fptr3, "%s", "\n");
+            fprintf(fptr3, "%s", "\n");
+            fprintf(fptr3, "%s", "\n");
+            fclose(fptr3);
+
+
           }
       }
 

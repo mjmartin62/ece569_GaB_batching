@@ -25,28 +25,36 @@ __global__ void DataPassGB(int *VtoC, int *CtoV, int *Receivedword, int *Interle
     n = threadIdx.x + blockIdx.x*blockDim.x;
     // Spaced position in interleaver matrix where modulo operation allows for multi word wrapping
     numB = (ColumnDegree * n) % NbBranch;
+    // Find which CW in concatenated array the thread is associated and calculate the offset for the concatenated array
+    int CW_offset = (n / N) * NbBranch;
+
+                    // DEBUG CODE
+            //if (n < N)
+             //  printf("CW offset = %d \n",CW_offset);
+
+
 
     // Conditional is boundary check
     if (n < N*numWords) {
         if (iter == 0) {
             for (t=0;t<ColumnDegree;t++)     
-               VtoC[Interleaver[numB+t]]=Receivedword[n];
+               VtoC[Interleaver[numB+t] + CW_offset]=Receivedword[n];
         }
         else {
 		    //Global=(Amplitude)*(1-2*ReceivedSymbol[n]);
 		    Global=(1-2*Receivedword[n]); 
 		    //Global=(1-2*(Decide[n] + Receivedword[n])); //Decide[n]^Receivedword[n];
 		    for (t=0;t<ColumnDegree;t++) 
-                Global+=(-2)*CtoV[Interleaver[numB+t]]+1;
+                Global+=(-2)*CtoV[Interleaver[numB+t] + CW_offset]+1;
 
 		    for (t=0;t<ColumnDegree;t++) {
-		        buf=Global-((-2)*CtoV[Interleaver[numB+t]]+1);
+		        buf=Global-((-2)*CtoV[Interleaver[numB+t] + CW_offset]+1);
 		        if (buf<0)  
-                    VtoC[Interleaver[numB+t]]= 1; //else VtoC[Interleaver[numB+t]]= 1;
+                    VtoC[Interleaver[numB+t] + CW_offset]= 1; //else VtoC[Interleaver[numB+t]]= 1;
 		        else if (buf>0) 
-                    VtoC[Interleaver[numB+t]]= 0; //else VtoC[Interleaver[numB+t]]= 1;
+                    VtoC[Interleaver[numB+t] + CW_offset]= 0; //else VtoC[Interleaver[numB+t]]= 1;
 		        else  
-                    VtoC[Interleaver[numB+t]]=Receivedword[n];
+                    VtoC[Interleaver[numB+t] + CW_offset]=Receivedword[n];
 		    }
         }
     }
@@ -60,16 +68,34 @@ __global__ void CheckPassGB(int *CtoV,int *VtoC,int M,int NbBranch,int RowDegree
     // Calc relative global memory index where m spans multiple concatenated arrays for multiple words
     m = threadIdx.x + blockIdx.x*blockDim.x;
     // Calculate strided position for message arrays
-    numB = RowDegree * m;
-    
+    numB = (RowDegree * m) % NbBranch;
+    // Find which CW in concatenated array the thread is associated and calculate the offset for the concatenated array
+    int CW_offset = (m / M) * NbBranch;
+
 
     // Conditional is boundary check
     if (m < M*numWords) {
         signe=0;
-        for (t=0;t<RowDegree;t++) 
-            signe^=VtoC[numB+t];
-        for (t=0;t<RowDegree;t++)   
-            CtoV[numB+t]=signe^VtoC[numB+t];
+        for (t=0;t<RowDegree;t++) {
+            signe^=VtoC[numB+t + CW_offset];
+            
+
+        }
+
+        for (t=0;t<RowDegree;t++) {
+            
+            
+            CtoV[numB+t + CW_offset]=signe^VtoC[numB+t + CW_offset];
+            //if (m > M)
+            //  printf("Sample CtoV data = %d at global position %d \n",CtoV[numB+t + CW_offset],numB+t + CW_offset);
+
+        }
+
+        
+            // DEBUG CODE
+           // if (m > M)
+            //  printf("Sample CtoV data = %d \n",CtoV[CW_offset + m]);
+
                         
     }
 }
@@ -84,12 +110,26 @@ __global__ void APP_GB(int *Decide,int *CtoV,int *Receivedword,int *Interleaver,
     n = threadIdx.x + blockIdx.x*blockDim.x;
 	// Spaced position in interleaver matrix where modulo operation allows for multi word wrapping
     numB = (ColumnDegree * n) % NbBranch;
+    // Find which CW in concatenated array the thread is associated and calculate the offset for the concatenated array
+    int CW_offset = (n / N) * NbBranch;
+
+
+
     
     // Conditional is boundary check
     if (n < N*numWords) {
 		Global=(1-2*Receivedword[n]);
+
+
+
 		for (t=0;t<ColumnDegree;t++) 
-            Global+=(-2)*CtoV[Interleaver[numB+t]]+1;
+            Global+=(-2)*CtoV[Interleaver[numB+t] + CW_offset]+1;
+
+            // DEBUG CODE
+            //if (n > N)
+             //   printf("Global value 2nd loc = %d \n",Global);
+
+
         if(Global>0) 
             Decide[n]= 0;
         else if (Global<0) 
@@ -97,6 +137,8 @@ __global__ void APP_GB(int *Decide,int *CtoV,int *Receivedword,int *Interleaver,
         else  
             Decide[n]=Receivedword[n];
     }
+
+
 }
 
 //#####################################################################################################
@@ -146,8 +188,10 @@ __global__ void ComputeSyndrome(int *Decide,int *Mat,int RowDegree,int M, int *D
             //printf("Kernel Internal Synd =  %d  \n",Synd);
 
         }
-                    if (Synd == 1)
-                break;
+        
+        if (Synd == 1)
+            break;
+
     }
 
     // Update Syndrome tracker array; each entry in array is assigned to single CW syndrome result
