@@ -473,14 +473,6 @@ int main(int argc, char * argv[])
               // Update the CN to VN message array
               CheckPassGB<<< ceil(M*numWords/(float)Block_size), Block_size, 0, stream[k] >>> (Dev_CtoV[k], Dev_VtoC[k], M, NbBranch, RowDegreeConst, numWords); 
 
-
-              // Debug code !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-              cudaMemcpyAsync(CtoV[k], Dev_CtoV[k],  numWords * NbBranch * sizeof(int), cudaMemcpyDeviceToHost, stream[k]);
-              cudaDeviceSynchronize();
-              // Debug code !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
-              
-
               //  Update the VN's (VN's are stored in the Decide array)
               APP_GB  <<< ceil(N*numWords/(float)Block_size), Block_size, 0, stream[k] >>> (Dev_Decide[k], Dev_CtoV[k], Dev_Receivedword[k], Dev_Interleaver, ColumnDegreeConst, N, M, NbBranch, numWords); 
               
@@ -512,11 +504,14 @@ int main(int argc, char * argv[])
             if (stream_state[m] == 1) {
               
               
-              // TMP CODE:  JUST CHECKING IF CW are VALID!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+              // TMP CODE:  Verification !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+              
               printf("Checking iteration %d \n",iter_batch);
               for (int b=0; b<numWords; b++){
                 printf("Codework check value for CW # %d in concatenated array =  %d  for Stream %d \n",b,IsCodeword[m][b],m);
               }
+              
+              // TMP CODE:  Verification !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
               // Determine if batch of CWs in concatenated array are all valid
               // Perform Multi CW concatenated array check
@@ -533,9 +528,6 @@ int main(int argc, char * argv[])
                 iter[m] = iter_batch;
                 stream_state[m] = 0;
                 cudaStreamDestroy(stream[m]);
-                // Debug code
-                // Print out number of iterations decoder took
-                //printf("Codework check value =  %d  for Stream %d recovered in %d runs \n",*IsCodeword[m],m,iter[m]);   
               }
             }
           }
@@ -575,6 +567,7 @@ int main(int argc, char * argv[])
       // Run H*CW syndrome check
       // Outer loop is for checking each stream
       // Inner loop is for checking the packed CWs within each stream
+      /*
       int *parsedDecideCW;
       parsedDecideCW=(int *)calloc(1296,sizeof(int));
       for (int countBatch=0; countBatch<stream_count; countBatch++) {
@@ -620,11 +613,9 @@ int main(int argc, char * argv[])
             fprintf(fptr3, "%s", "\n");
             fprintf(fptr3, "%s", "\n");
             fclose(fptr3);
-
-
           }
       }
-
+      */
       
 	    //============================================================================
   	  // Batch Compute Statistics
