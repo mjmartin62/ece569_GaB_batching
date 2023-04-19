@@ -141,6 +141,7 @@ int main(int argc, char * argv[])
   int Block_size = std::stoi(argv[4]);
   int numWords = std::stoi(argv[5]);
   int reserved_6 = std::stoi(argv[6]);
+
   
   // Variables Declaration
   FILE *f;
@@ -177,12 +178,11 @@ int main(int argc, char * argv[])
   // Overrides for verification and testing runs
   // ----------------------------------------------------
   
-  alpha_max = 0.02;
+  alpha_max = 0.03;
   alpha_min = 0.01;
   alpha_step = 0.01;
-  NbMonteCarlo = 100000;
-  
-  
+  NbMonteCarlo = 10000;
+
   // ----------------------------------------------------
   // Load Matrix
   // ----------------------------------------------------
@@ -204,18 +204,17 @@ int main(int argc, char * argv[])
   strcpy(FileName,FileMatrix);
   strcat(FileName,"_RowDegree");
   f=fopen(FileName,"r");
+
   for (m=0;m<M;m++) 
-    fscanf(f,"%d",&RowDegree[m]);
-    fclose(f);
+   fscanf(f,"%d",&RowDegree[m]);
+  fclose(f);
+
   Mat=(int **)calloc(M,sizeof(int *));for (m=0;m<M;m++) Mat[m]=(int *)calloc(RowDegree[m],sizeof(int));
   strcpy(FileName,FileMatrix);
   f=fopen(FileName,"r");for (m=0;m<M;m++) { for (k=0;k<RowDegree[m];k++) fscanf(f,"%d",&Mat[m][k]); }fclose(f);
   for (m=0;m<M;m++) { for (k=0;k<RowDegree[m];k++) ColumnDegree[Mat[m][k]]++; }
 
-
-
    int RowDegMax = RowDegree[0];
-  
   // ----------------------------------------------------
   // Build Graph
   // ----------------------------------------------------
@@ -250,7 +249,6 @@ int main(int argc, char * argv[])
     for (k=0;k<ColumnDegree[n];k++) 
       Interleaver[numBranch++]=NtoB[n][k]; 
   }
-
 
   // ----------------------------------------------------
   // Decoder variables and Host memory allocation
@@ -365,14 +363,6 @@ int main(int argc, char * argv[])
 
   }
   cudaMemcpy(Dev_Mat, Mat_flattened, RowDegreeConst * M *sizeof(int), cudaMemcpyHostToDevice);
-  /*
-  for (int i = 0; i < M ; i++) {
-    if (cudaMemcpy((Dev_Mat+RowDegMax*i), *(Mat+i), RowDegMax * sizeof(int), cudaMemcpyHostToDevice) != cudaSuccess){
-    printf("data transfer error from host to device on Dev_Mat\n");
-    return 0;
-    }
-  }
-  */
 
   // ----------------------------------------------------
   // Stream based Device Memory allocations
@@ -404,16 +394,17 @@ int main(int argc, char * argv[])
 
   // Assign host side pinned memory where each word and initialized message arrays will be assigned to a stream
   for (int m=0; m<stream_count; m++) {
-
     cudaHostAlloc((void**) &Receivedword[m], numWords * N * sizeof(int), cudaHostAllocDefault);
     cudaHostAlloc((void**) &Decide[m], numWords * N * sizeof(int), cudaHostAllocDefault);
     cudaHostAlloc((void**) &IsCodeword[m], numWords * sizeof(int), cudaHostAllocDefault);
-    
-    // MIGHT BE ABLE TO INITIALIZE THESE ONCE SINCE THEY ARE THE SAME FOR EACH BATCH LAUNCH!!!!!!!!!!!!!!!!!!!!!
     cudaHostAlloc((void**) &VtoC[m], numWords * NbBranch * sizeof(int), cudaHostAllocDefault);
     cudaHostAlloc((void**) &CtoV[m], numWords * NbBranch * sizeof(int), cudaHostAllocDefault);
   }
 
+  // invoke CUDA streams
+  for (int m=0; m<stream_count; m++) {
+    cudaStreamCreate(&stream[m]);
+  }
 
   // Loop for different channel bit error rates
   for(alpha=alpha_max;alpha>=alpha_min;alpha-=alpha_step) {
@@ -444,10 +435,10 @@ int main(int argc, char * argv[])
         }
       }
 
-      // invoke streams
-      for (int m=0; m<stream_count; m++) {
-        cudaStreamCreate(&stream[m]);
-      }
+      // ##############################################################
+      //                         TIMER STARTS 
+
+      // ##############################################################
 
       // Stream corrupted set of codewords from pinned host memory to device
       for (int m=0; m<stream_count; m++) {
@@ -480,40 +471,30 @@ int main(int argc, char * argv[])
               
               // Update host side memory for host controller error correction convergence check
               cudaMemcpyAsync(IsCodeword[k], Dev_Syndrome[k],  numWords * sizeof(int), cudaMemcpyDeviceToHost, stream[k]);
-              // Update most recent corrected codeword copy to host memory (Most messages will recover with no iterations)
-              cudaMemcpyAsync(Decide[k], Dev_Decide[k], numWords * N * sizeof(int), cudaMemcpyDeviceToHost, stream[k]);
+
             }
           }
 
-            // Sync Host and Device
-            cudaDeviceSynchronize();
-
-          
-
-
-          // Sync active streams for host side checks and updates
-          for (int m=0; m<stream_count; m++) {
-            if (stream_state[m] == 1)
-              cudaStreamSynchronize(stream[m]);
-          }
+          // Sync Host and Device to ensure host side convergence checks are valid
+          cudaDeviceSynchronize();
 
           // Check for codeword recovery and update stream states as neccissary
           for (int m=0; m<stream_count; m++) {
             if (stream_state[m] == 1) {
               
               
-              // TMP CODE:  Verification !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+              // TMP CODE:  Verification !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! 
               /*
               printf("Checking iteration %d \n",iter_batch);
               for (int b=0; b<numWords; b++){
                 printf("Codework check value for CW # %d in concatenated array =  %d  for Stream %d \n",b,IsCodeword[m][b],m);
               }
               */
-              // TMP CODE:  Verification !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
 
               // Determine if batch of CWs in concatenated array are all valid
               // Perform Multi CW concatenated array check
-              // Update iteration tracker
+              // Update iteration tracker for each word
               int concat_check = 1;
               for (int k=0; k<numWords; k++) {
                 if (IsCodeword[m][k] == 1 && iter[m][k] == 0) {
@@ -521,11 +502,10 @@ int main(int argc, char * argv[])
                 }
                 concat_check = concat_check && IsCodeword[m][k];
               }
-              // Kill stream if all CWs in concatenated array are recovered
+              // Update stream state array and pull corrected concatenated array back to host
               if (concat_check == 1) {
-                // Update stream state array and kill stream
                 stream_state[m] = 0;
-                cudaStreamDestroy(stream[m]);
+                cudaMemcpyAsync(Decide[m], Dev_Decide[m], numWords * N * sizeof(int), cudaMemcpyDeviceToHost, stream[m]);
               }
             }
           }
@@ -541,15 +521,14 @@ int main(int argc, char * argv[])
               batch_state = 1;
               break; 
             }
-          }
-              
+          }    
       }
       
-      // Kill any residual streams associated with codeword that was not recovered
+      // Reconcile residual streams associated with codewords that were not recovered
       // and set the number of decoder iterations to the max allowable iterations
       for (int m=0; m<stream_count; m++) {
         if (stream_state[m] == 1) {
-          cudaStreamDestroy(stream[m]);
+          cudaMemcpyAsync(Decide[m], Dev_Decide[m], numWords * N * sizeof(int), cudaMemcpyDeviceToHost, stream[m]);
           for (int k=0; k<numWords; k++) {
               if (IsCodeword[m][k] == 0) {
                   iter[m][k] = iter_batch;
@@ -557,14 +536,14 @@ int main(int argc, char * argv[])
           }
         }
       }
-      
 
-
-
-
-
-      // Sync Host and Device
+      // Sync Host and Device to ensure error corrected words are available for stats processing
       cudaDeviceSynchronize();
+
+      // ##############################################################
+      //                         TIMER ENDS 
+
+      // ##############################################################
 
 
 
@@ -724,6 +703,37 @@ int main(int argc, char * argv[])
     cudaFree(Dev_VtoC[m]);
     cudaFree(Dev_CtoV[m]);
   }
+
+  cudaFree(Dev_Interleaver);
+  cudaFree(Dev_ColumnDegree);
+  cudaFree(Dev_RowDegree);
+  cudaFree(Dev_Mat);
+
+  /*
+  free(ColumnDegree);
+  free(RowDegree);
+  free(FileName);
+  free(FileMatrix);
+  free(FileResult);
+  free(name);
+  free(Interleaver);
+  free(NtoB);
+  free(Mat);
+  free(CtoV);
+  free(VtoC);
+  free(Codeword);
+  free(Receivedword);
+  free(Decide);
+  free(IsCodeword);
+  free(U);
+  free(MatG);
+  free(PermG);
+  free(MatFull);
+  free(Mat_flattened);
+  */
+
+
+
 
   fclose(f);
   return(0);
