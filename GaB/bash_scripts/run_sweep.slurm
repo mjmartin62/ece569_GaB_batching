@@ -1,18 +1,20 @@
 #!/bin/bash
 
-
-### Specify "wallclock time", hhh:mm:ss. Required field
-#SBATCH --time 00:03:00
-
-###
-
-
+###  Runs nested loops for multiple CUDA configurations
+# i = number of CUDA STREAMS
+# j = BLOCK SIZE
+# k = number of words per CUDA STREAM
 
 ### run sweep
 for i in {2..4..2}
 do
-  ./bin/main ~/ece569/proj/source/GaB/IRISC_dv4_R050_L54_N1296_Dform IRISC_dv4_R050_L54_N1296_Dform_Res_cu $i 32 100 0
-
+    for j in {32..64..32}
+    do
+        for k in {10..20..10}
+        do
+            ./bin/main ~/ece569/proj/source/GaB/IRISC_dv4_R050_L54_N1296_Dform IRISC_dv4_R050_L54_N1296_Dform_Res_cu $i $j $k 0
+        done
+    done
 done
 
 

@@ -18,6 +18,7 @@
 #include <unistd.h>
 #include "GaB.h"
 #include <iostream>
+#include <time.h>
 using namespace std;
 
 #define arrondi(x) ((ceil(x)-x)<(x-floor(x))?(int)ceil(x):(int)floor(x))
@@ -147,6 +148,9 @@ int main(int argc, char * argv[])
   FILE *f;
   int Graine,NbIter,nbtestedframes,NBframes;
   float alpha_max, alpha_min,alpha_step,alpha,NbMonteCarlo;
+  clock_t start_time, end_time; 
+  float total_time;
+  long int total_words = 0;
   // ----------------------------------------------------
   // lecture des param de la ligne de commande
   // ----------------------------------------------------
@@ -181,7 +185,7 @@ int main(int argc, char * argv[])
   alpha_max = 0.03;
   alpha_min = 0.01;
   alpha_step = 0.01;
-  NbMonteCarlo = 10000;
+  NbMonteCarlo = 100;
 
   // ----------------------------------------------------
   // Load Matrix
@@ -360,7 +364,6 @@ int main(int argc, char * argv[])
     for (int r=0; r<RowDegreeConst; r++){
       Mat_flattened[m*RowDegreeConst + r] = Mat[m][r];
     }
-
   }
   cudaMemcpy(Dev_Mat, Mat_flattened, RowDegreeConst * M *sizeof(int), cudaMemcpyHostToDevice);
 
@@ -418,6 +421,7 @@ int main(int argc, char * argv[])
       
       // Fill codeword pseudo buffer
       CodewordBatchGenerator(Codeword, Receivedword, MatG, PermG, alpha, rank, N, U, Batch_size, numWords);
+      total_words = total_words + Batch_size*numWords;
 
 
       // Initialize stream state array (1 = not complete, 0 = complete)
@@ -437,7 +441,7 @@ int main(int argc, char * argv[])
 
       // ##############################################################
       //                         TIMER STARTS 
-
+      start_time = clock();
       // ##############################################################
 
       // Stream corrupted set of codewords from pinned host memory to device
@@ -542,7 +546,8 @@ int main(int argc, char * argv[])
 
       // ##############################################################
       //                         TIMER ENDS 
-
+      end_time = clock();
+      total_time = total_time + (float)(end_time - start_time) / CLOCKS_PER_SEC;
       // ##############################################################
 
 
@@ -709,7 +714,6 @@ int main(int argc, char * argv[])
   cudaFree(Dev_RowDegree);
   cudaFree(Dev_Mat);
 
-  /*
   free(ColumnDegree);
   free(RowDegree);
   free(FileName);
@@ -730,13 +734,16 @@ int main(int argc, char * argv[])
   free(PermG);
   free(MatFull);
   free(Mat_flattened);
-  */
-
-
-
-
+  
   fclose(f);
+  
+  // Update stats file for optimization data collection
+  float minutesPerMillionWords = (total_time / 60) / ((float)total_words / 1000000);
+  FILE *fptr5;
+  fptr5 = (fopen("sweeping_studies_data_collection.txt", "a+"));
+  fprintf(fptr5, "%d %d %d %f %d %f \n", Batch_size, Block_size, numWords, total_time, total_words, minutesPerMillionWords);
+  fclose(fptr5);
+
   return(0);
 
-  
 }
