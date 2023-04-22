@@ -465,9 +465,9 @@ printf("using block size = %d\n",Block_size);
               DataPassGB <<< ceil(N*numWords/(float)Block_size), Block_size, 0, stream[k] >>> (Dev_VtoC[k], Dev_CtoV[k], Dev_Receivedword[k], Dev_Interleaver, ColumnDegreeConst, N, NbBranch, iter_batch, numWords);
               
               // Update the CN to VN message array
-              //CheckPassGB<<< ceil(M*numWords/(float)Block_size), Block_size, 0, stream[k] >>> (Dev_CtoV[k], Dev_VtoC[k], M, NbBranch, RowDegreeConst, numWords); 
-              CheckPassGB<<< ceil(NbBranch*numWords/(float)Block_size), Block_size, 0, stream[k] >>> (Dev_CtoV[k], Dev_VtoC[k], M, NbBranch, RowDegreeConst, numWords);
-              cudaMemcpyAsync(CtoV[k], Dev_CtoV[k], numWords * NbBranch * sizeof(int), cudaMemcpyDeviceToHost, stream[k]);
+              CheckPassGB<<< ceil(M*numWords/(float)Block_size), Block_size, 0, stream[k] >>> (Dev_CtoV[k], Dev_VtoC[k], M, NbBranch, RowDegreeConst, numWords); 
+              //CheckPassGB<<< ceil(NbBranch*numWords/(float)Block_size), Block_size, 0, stream[k] >>> (Dev_CtoV[k], Dev_VtoC[k], M, NbBranch, RowDegreeConst, numWords);
+
 
 
               //  Update the VN's (VN's are stored in the Decide array)

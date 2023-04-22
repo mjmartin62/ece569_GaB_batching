@@ -62,6 +62,30 @@ __global__ void DataPassGB(int *VtoC, int *CtoV, int *Receivedword, int *Interle
 
 //##################################################################################################
 // Update the CN to VN message array [Includes Multi Codeword Processing]
+// Naive implemenation
+__global__ void CheckPassGB(int *CtoV,int *VtoC,int M,int NbBranch,int RowDegree, int numWords)
+{
+    int t,numB=0,m,signe;
+    // Calc relative global memory index where m spans multiple concatenated message arrays
+    m = threadIdx.x + blockIdx.x*blockDim.x;
+    // Calculate strided position for message arrays
+    numB = (RowDegree * m) % NbBranch;
+    // Find CW offset in concatenated array 
+    int CW_offset = (m / M) * NbBranch;
+
+    // Conditional is boundary check
+    if (m < M*numWords) {
+        signe=0;
+        for (t=0;t<RowDegree;t++) {
+            signe^=VtoC[numB+t + CW_offset];
+        }
+        for (t=0;t<RowDegree;t++) {     
+            CtoV[numB+t + CW_offset]=signe^VtoC[numB+t + CW_offset];
+        }
+    }
+}
+
+// Faux memory access simulation
 /*
 __global__ void CheckPassGB(int *CtoV,int *VtoC,int M,int NbBranch,int RowDegree, int numWords)
 {
@@ -72,28 +96,28 @@ __global__ void CheckPassGB(int *CtoV,int *VtoC,int M,int NbBranch,int RowDegree
     numB = (RowDegree * m) % NbBranch;
     // Find which CW in concatenated array the thread is associated and calculate the offset for the concatenated array
     int CW_offset = (m / M) * NbBranch;
-
+    int offset2 = m % M;
 
     // Conditional is boundary check
     if (m < M*numWords) {
         signe=0;
         for (t=0;t<RowDegree;t++) {
-            signe^=VtoC[numB+t + CW_offset];
-            
+            //signe^=VtoC[numB+t + CW_offset];
+            signe^=VtoC[offset2 + t*M + CW_offset];
 
         }
 
         for (t=0;t<RowDegree;t++) {     
-            CtoV[numB+t + CW_offset]=signe^VtoC[numB+t + CW_offset];
+            //CtoV[numB+t + CW_offset]=signe^VtoC[numB+t + CW_offset];
+            CtoV[offset2 + t*M + CW_offset]=signe^VtoC[offset2 + t*M + CW_offset];
         }
             
     }
 }
 */
 
-//##################################################################################################
-// Update the CN to VN message array [Includes Multi Codeword Processing]
-
+// Reduction based implemenation
+/*
 __global__ void CheckPassGB(int *CtoV,int *VtoC,int M,int NbBranch,int RowDegree, int numWords)
 {
     // Calc relative global memory index where m spans multiple concatenated message arrays for multiple words
@@ -104,9 +128,6 @@ __global__ void CheckPassGB(int *CtoV,int *VtoC,int M,int NbBranch,int RowDegree
     __shared__ int sh_VtoC[128];
     // shared memory declaration for signe (blocksize* 1/2 * row degree)
     __shared__ int sh_signe[128];
-
-    // Find which CW in concatenated array the thread is associated with
-    //int CW_offset = m % NbBranch;
 
     // Conditional is boundary check
     if (m < NbBranch*numWords) {
@@ -122,13 +143,10 @@ __global__ void CheckPassGB(int *CtoV,int *VtoC,int M,int NbBranch,int RowDegree
         // Reduction loop set up to limit thread control divergence
         for (int boundary = blockDim.x; boundary > blockDim.x/RowDegree; boundary = boundary/2) {
             if (tid < boundary/2) {
-                if (m == 686)
-                    printf("in this loop boundary = %d\n", boundary);
                 int tmp = sh_signe[tid*2] ^ sh_signe[tid*2 + 1];
                 __syncthreads();
                 sh_signe[tid] = tmp;
                 __syncthreads();
-
             }
         }
         // Sync threads before writing to global memory then construct
@@ -137,7 +155,7 @@ __global__ void CheckPassGB(int *CtoV,int *VtoC,int M,int NbBranch,int RowDegree
     
     }
 }
-
+*/
 
 //#####################################################################################################
 //  Update the VN's [Includes Multi Codeword Processing]
