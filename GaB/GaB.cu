@@ -62,6 +62,7 @@ __global__ void DataPassGB(int *VtoC, int *CtoV, int *Receivedword, int *Interle
 
 //##################################################################################################
 // Update the CN to VN message array [Includes Multi Codeword Processing]
+/*
 __global__ void CheckPassGB(int *CtoV,int *VtoC,int M,int NbBranch,int RowDegree, int numWords)
 {
     int t,numB=0,m,signe;
@@ -82,23 +83,61 @@ __global__ void CheckPassGB(int *CtoV,int *VtoC,int M,int NbBranch,int RowDegree
 
         }
 
-        for (t=0;t<RowDegree;t++) {
-            
-            
+        for (t=0;t<RowDegree;t++) {     
             CtoV[numB+t + CW_offset]=signe^VtoC[numB+t + CW_offset];
-            //if (m > M)
-            //  printf("Sample CtoV data = %d at global position %d \n",CtoV[numB+t + CW_offset],numB+t + CW_offset);
-
         }
-
-        
-            // DEBUG CODE
-           // if (m > M)
-            //  printf("Sample CtoV data = %d \n",CtoV[CW_offset + m]);
-
-                        
+            
     }
 }
+*/
+
+//##################################################################################################
+// Update the CN to VN message array [Includes Multi Codeword Processing]
+
+__global__ void CheckPassGB(int *CtoV,int *VtoC,int M,int NbBranch,int RowDegree, int numWords)
+{
+    // Calc relative global memory index where m spans multiple concatenated message arrays for multiple words
+    int m = threadIdx.x + blockIdx.x*blockDim.x;
+    int tid = threadIdx.x;
+
+    // shared memory declaration for a copy of the VtoC message array (blocksize*row degree)
+    __shared__ int sh_VtoC[128];
+    // shared memory declaration for signe (blocksize* 1/2 * row degree)
+    __shared__ int sh_signe[128];
+
+    // Find which CW in concatenated array the thread is associated with
+    //int CW_offset = m % NbBranch;
+
+    // Conditional is boundary check
+    if (m < NbBranch*numWords) {
+
+        // pull in from global to shared memory and sync threads before subsequent computations occur
+        sh_VtoC[tid] = VtoC[m];
+        __syncthreads();
+        // make copy and sync threads
+        sh_signe[tid] = sh_VtoC[tid];
+        __syncthreads();
+
+        // Reduction to single signe value for each CN
+        // Reduction loop set up to limit thread control divergence
+        for (int boundary = blockDim.x; boundary > blockDim.x/RowDegree; boundary = boundary/2) {
+            if (tid < boundary/2) {
+                if (m == 686)
+                    printf("in this loop boundary = %d\n", boundary);
+                int tmp = sh_signe[tid*2] ^ sh_signe[tid*2 + 1];
+                __syncthreads();
+                sh_signe[tid] = tmp;
+                __syncthreads();
+
+            }
+        }
+        // Sync threads before writing to global memory then construct
+        __syncthreads();
+        CtoV[m] = sh_signe[tid / RowDegree] ^ sh_VtoC[tid];
+    
+    }
+}
+
 
 //#####################################################################################################
 //  Update the VN's [Includes Multi Codeword Processing]

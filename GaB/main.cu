@@ -129,7 +129,7 @@ int GaussianElimination_MRB(int *Perm,int **MatOut,int **Mat,int M,int N)
 //#####################################################################################################
 // Function Inputs
 // Argv 1 = matrix
-// argv 2 = matrix
+// argv 2 = output
 // argv 3 = codeword batch size
 // argv 4 = reserved
 // argv 5 = reserved
@@ -143,6 +143,7 @@ int main(int argc, char * argv[])
   int numWords = std::stoi(argv[5]);
   int reserved_6 = std::stoi(argv[6]);
 
+printf("using block size = %d\n",Block_size);
   
   // Variables Declaration
   FILE *f;
@@ -168,7 +169,7 @@ int main(int argc, char * argv[])
   // Simulation input for GaB BF
   // ----------------------------------------------------
   NbMonteCarlo=100000;	    // Maximum nb of codewords sent
-  NbIter=100; 	            // Maximum nb of iterations
+  NbIter=3; 	            // Maximum nb of iterations
   //alpha= 0.01;              // Channel probability of error
   NBframes=100;	            // Simulation stops when NBframes in error
   Graine=1;		            // Seed Initialization for Multiple Simulations
@@ -182,10 +183,10 @@ int main(int argc, char * argv[])
   // Overrides for verification and testing runs
   // ----------------------------------------------------
   
-  alpha_max = 0.03;
-  alpha_min = 0.01;
+  alpha_max = 0.00001;
+  alpha_min = 0.00001;
   alpha_step = 0.01;
-  NbMonteCarlo = 100;
+  NbMonteCarlo = 10;
 
   // ----------------------------------------------------
   // Load Matrix
@@ -464,11 +465,16 @@ int main(int argc, char * argv[])
               DataPassGB <<< ceil(N*numWords/(float)Block_size), Block_size, 0, stream[k] >>> (Dev_VtoC[k], Dev_CtoV[k], Dev_Receivedword[k], Dev_Interleaver, ColumnDegreeConst, N, NbBranch, iter_batch, numWords);
               
               // Update the CN to VN message array
-              CheckPassGB<<< ceil(M*numWords/(float)Block_size), Block_size, 0, stream[k] >>> (Dev_CtoV[k], Dev_VtoC[k], M, NbBranch, RowDegreeConst, numWords); 
+              //CheckPassGB<<< ceil(M*numWords/(float)Block_size), Block_size, 0, stream[k] >>> (Dev_CtoV[k], Dev_VtoC[k], M, NbBranch, RowDegreeConst, numWords); 
+              CheckPassGB<<< ceil(NbBranch*numWords/(float)Block_size), Block_size, 0, stream[k] >>> (Dev_CtoV[k], Dev_VtoC[k], M, NbBranch, RowDegreeConst, numWords);
+              cudaMemcpyAsync(CtoV[k], Dev_CtoV[k], numWords * NbBranch * sizeof(int), cudaMemcpyDeviceToHost, stream[k]);
+
 
               //  Update the VN's (VN's are stored in the Decide array)
               APP_GB  <<< ceil(N*numWords/(float)Block_size), Block_size, 0, stream[k] >>> (Dev_Decide[k], Dev_CtoV[k], Dev_Receivedword[k], Dev_Interleaver, ColumnDegreeConst, N, M, NbBranch, numWords); 
               
+
+
               // Check to see if updated codeword has been recovered
               //ComputeSyndrome <<< ceil(M*numWords/(float)Block_size), Block_size, 0, stream[k] >>> (Dev_Decide[k], Dev_Mat, Dev_RowDegree, M, Dev_Syndrome[k], numWords); 
               ComputeSyndrome <<< 1, numWords, 0, stream[k] >>> (Dev_Decide[k], Dev_Mat, RowDegreeConst, M, Dev_Syndrome[k], numWords); 
@@ -488,13 +494,12 @@ int main(int argc, char * argv[])
               
               
               // TMP CODE:  Verification !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! 
-              /*
+              
               printf("Checking iteration %d \n",iter_batch);
               for (int b=0; b<numWords; b++){
                 printf("Codework check value for CW # %d in concatenated array =  %d  for Stream %d \n",b,IsCodeword[m][b],m);
               }
-              */
-
+              
 
               // Determine if batch of CWs in concatenated array are all valid
               // Perform Multi CW concatenated array check
@@ -558,7 +563,7 @@ int main(int argc, char * argv[])
       // Run H*CW syndrome check
       // Outer loop is for checking each stream
       // Inner loop is for checking the packed CWs within each stream
-      /*
+      
       int *parsedDecideCW;
       parsedDecideCW=(int *)calloc(1296,sizeof(int));
       for (int countBatch=0; countBatch<stream_count; countBatch++) {
@@ -606,8 +611,8 @@ int main(int argc, char * argv[])
             fclose(fptr3);
           }
       }
-      */
       
+
 	    //============================================================================
   	  // Batch Compute Statistics
 	    //============================================================================

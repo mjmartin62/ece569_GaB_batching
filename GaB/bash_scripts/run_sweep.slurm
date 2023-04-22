@@ -6,11 +6,11 @@
 # k = number of words per CUDA STREAM
 
 ### run sweep
-for i in {2..4..2}
+for i in {5,20,35}
 do
-    for j in {32..64..32}
+    for j in {32,128,512,1024}
     do
-        for k in {10..20..10}
+        for k in {5,20,35}
         do
             ./bin/main ~/ece569/proj/source/GaB/IRISC_dv4_R050_L54_N1296_Dform IRISC_dv4_R050_L54_N1296_Dform_Res_cu $i $j $k 0
         done
