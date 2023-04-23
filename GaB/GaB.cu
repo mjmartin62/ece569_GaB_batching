@@ -14,6 +14,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <unistd.h>
+#include "GaB.h"
 
 //#####################################################################################################
 // Update VN to CN message array [Includes Multi Codeword Processing]
@@ -181,10 +182,6 @@ __global__ void APP_GB(int *Decide,int *CtoV,int *Receivedword,int *Interleaver,
 
 		for (t=0;t<ColumnDegree;t++) 
             Global+=(-2)*CtoV[Interleaver[numB+t] + CW_offset]+1;
-
-            // DEBUG CODE
-            //if (n > N)
-             //   printf("Global value 2nd loc = %d \n",Global);
 
 
         if(Global>0) 

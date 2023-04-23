@@ -7,3 +7,5 @@ __global__ void CheckPassGB(int *DCtoV, int *VtoC,int M,int NbBranch,int RowDegr
 __global__ void APP_GB(int *Decide,int *CtoV,int *Receivedword,int *Interleaver,int ColumnDegree,int N,int M,int NbBranch, int numWords);
 
 __global__ void ComputeSyndrome(int *Decide,int *Mat,int RowDegree,int M, int *Dev_Syndrome, int numWords);
+
+__constant__ int c_Interleaver[5184];

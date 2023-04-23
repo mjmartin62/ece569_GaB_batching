@@ -29,6 +29,10 @@ using namespace std;
 #define BPSK(x) (1-2*(x))
 #define PI 3.1415926536
 
+
+
+
+
 // Verificaton Function ###############################################################################
 int VerificationComputeSyndrome(int *Decide,int **Mat,int *RowDegree,int M)
 {
@@ -183,10 +187,10 @@ printf("using block size = %d\n",Block_size);
   // Overrides for verification and testing runs
   // ----------------------------------------------------
   
-  alpha_max = 0.00001;
-  alpha_min = 0.00001;
+  alpha_max = 0.0100;
+  alpha_min = 0.0100;
   alpha_step = 0.01;
-  NbMonteCarlo = 10;
+  NbMonteCarlo = 20;
 
   // ----------------------------------------------------
   // Load Matrix
@@ -347,6 +351,8 @@ printf("using block size = %d\n",Block_size);
     printf("malloc error for *Dev_Mat \n");
     return 0;
   }
+
+  
   
   // ----------------------------------------------------
   // Constant Device Memory Transfers
@@ -499,6 +505,7 @@ printf("using block size = %d\n",Block_size);
               for (int b=0; b<numWords; b++){
                 printf("Codework check value for CW # %d in concatenated array =  %d  for Stream %d \n",b,IsCodeword[m][b],m);
               }
+              
               
 
               // Determine if batch of CWs in concatenated array are all valid
