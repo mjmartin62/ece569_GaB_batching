@@ -228,6 +228,7 @@ __global__ void ComputeSyndrome(int *Decide,int *Mat,int *RowDegree,int M, int *
 */
 
 // This is a temp kernel w/o optimzation in mind
+/*
 __global__ void ComputeSyndrome(int *Decide,int *Mat,int RowDegree,int M, int *Dev_Syndrome, int numWords)
 {
 	int Synd,k,l,i;
@@ -250,6 +251,55 @@ __global__ void ComputeSyndrome(int *Decide,int *Mat,int RowDegree,int M, int *D
 
     // Update Syndrome tracker array; each entry in array is assigned to single CW syndrome result
     Dev_Syndrome[threadIdx.x] = 1-Synd;
+}
+*/
 
+// This kernel is for multiple codeword 
+__global__ void ComputeSyndrome(int *Decide,int *Mat,int RowDegree,int M,
+                                           int *Dev_Syndrome, int numWords)
+{
+	int Synd = 0,k,l;
+    //Shared memory to utilize reduction operation  
+    __shared__ int sh_Synd[512];
+    //Pointer to hold the starting point of Decide array of operating codeword
+    //int *Decide_skid;
+
+     //Global thread Index. Shall be in the range of 0 to num_codeword * 2048
+     int n = threadIdx.x + blockIdx.x*blockDim.x;
+     //Thread Index at thread block level 
+     int thd_id = threadIdx.x;
+    
+     //Initialize tshared memory to 0 and wait for all threads to complete 
+     sh_Synd[thd_id] = 0; __syncthreads();
+   
+     int cw_operated = n/1024; //Find the CW on which thd block is operating 
+
+     //Initialize the Global memory Dev_Syndrome to 1 for each codeword 
+     if(n %1024 == 0 ) Dev_Syndrome[cw_operated] = 1; __syncthreads();
+          
+         
+     int idx = (n %1024); //Find the bit location on the operating codeword 
+     int vld_idx = idx < M; //Qual to check the thd is in H Mat Row range[0-647]
+
+     //Find the Decide location for the operating codeword 
+     __syncthreads();
+   
+     //Check bit level syndrome     
+     //if (vld_idx) {
+    	 for (l=0;l<RowDegree;l++)Synd=Synd^Decide[Mat[idx*8 + l] + (cw_operated * 1296) ];    
+     	 if (vld_idx) sh_Synd[thd_id] = Synd; 
+     //}
+     __syncthreads();
+     
+    //Reduce to a single value 
+    for(int stride = blockDim.x/2 ; stride > 0; stride = stride/2) {
+     sh_Synd[thd_id] = sh_Synd[thd_id] | sh_Synd[thd_id + stride];
+     __syncthreads();
+     } 
+     //Write back to Global memory
+     if (thd_id == 0 ) atomicMin(&Dev_Syndrome[cw_operated],(1 - sh_Synd[0])); 
+     // if (vld_idx ) atomicMin(Dev_Syndrome+ (cw_operated << 2),(1 - sh_Synd[thd_id]));
+     // printf ("\n %x",  Dev_Syndrome+ (cw_operated << 2));
+     __syncthreads();
 
 }

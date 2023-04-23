@@ -147,7 +147,6 @@ int main(int argc, char * argv[])
   int numWords = std::stoi(argv[5]);
   int reserved_6 = std::stoi(argv[6]);
 
-printf("using block size = %d\n",Block_size);
   
   // Variables Declaration
   FILE *f;
@@ -173,7 +172,7 @@ printf("using block size = %d\n",Block_size);
   // Simulation input for GaB BF
   // ----------------------------------------------------
   NbMonteCarlo=100000;	    // Maximum nb of codewords sent
-  NbIter=3; 	            // Maximum nb of iterations
+  NbIter=100; 	            // Maximum nb of iterations
   //alpha= 0.01;              // Channel probability of error
   NBframes=100;	            // Simulation stops when NBframes in error
   Graine=1;		            // Seed Initialization for Multiple Simulations
@@ -187,10 +186,10 @@ printf("using block size = %d\n",Block_size);
   // Overrides for verification and testing runs
   // ----------------------------------------------------
   
-  alpha_max = 0.0100;
-  alpha_min = 0.0100;
+  alpha_max= 0.04;		    //Channel Crossover Probability Max and Min
+  alpha_min= 0.02;
   alpha_step = 0.01;
-  NbMonteCarlo = 20;
+  NbMonteCarlo = 100000;
 
   // ----------------------------------------------------
   // Load Matrix
@@ -483,7 +482,8 @@ printf("using block size = %d\n",Block_size);
 
               // Check to see if updated codeword has been recovered
               //ComputeSyndrome <<< ceil(M*numWords/(float)Block_size), Block_size, 0, stream[k] >>> (Dev_Decide[k], Dev_Mat, Dev_RowDegree, M, Dev_Syndrome[k], numWords); 
-              ComputeSyndrome <<< 1, numWords, 0, stream[k] >>> (Dev_Decide[k], Dev_Mat, RowDegreeConst, M, Dev_Syndrome[k], numWords); 
+              //ComputeSyndrome <<< 1, numWords, 0, stream[k] >>> (Dev_Decide[k], Dev_Mat, RowDegreeConst, M, Dev_Syndrome[k], numWords); 
+              ComputeSyndrome <<< ceil(1024*numWords/(float)Block_size), Block_size, 0, stream[k] >>> (Dev_Decide[k], Dev_Mat, RowDegreeConst, M, Dev_Syndrome[k], numWords); 
               
               // Update host side memory for host controller error correction convergence check
               cudaMemcpyAsync(IsCodeword[k], Dev_Syndrome[k],  numWords * sizeof(int), cudaMemcpyDeviceToHost, stream[k]);
@@ -500,11 +500,12 @@ printf("using block size = %d\n",Block_size);
               
               
               // TMP CODE:  Verification !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! 
-              
+              /*
               printf("Checking iteration %d \n",iter_batch);
               for (int b=0; b<numWords; b++){
                 printf("Codework check value for CW # %d in concatenated array =  %d  for Stream %d \n",b,IsCodeword[m][b],m);
               }
+              */
               
               
 
@@ -570,7 +571,7 @@ printf("using block size = %d\n",Block_size);
       // Run H*CW syndrome check
       // Outer loop is for checking each stream
       // Inner loop is for checking the packed CWs within each stream
-      
+      /*
       int *parsedDecideCW;
       parsedDecideCW=(int *)calloc(1296,sizeof(int));
       for (int countBatch=0; countBatch<stream_count; countBatch++) {
@@ -618,6 +619,7 @@ printf("using block size = %d\n",Block_size);
             fclose(fptr3);
           }
       }
+      */
       
 
 	    //============================================================================
@@ -701,6 +703,12 @@ printf("using block size = %d\n",Block_size);
     fprintf(f,"%d(%d)\n",NbUnDetectedErrors,Dmin);
     
     
+  }
+
+  // kill streams
+  // invoke CUDA streams
+  for (int m=0; m<stream_count; m++) {
+    cudaStreamDestroy(stream[m]);
   }
 
   //  Clean Memory
