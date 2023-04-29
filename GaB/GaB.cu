@@ -14,6 +14,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <unistd.h>
+#include "GaB.h"
 
 //#####################################################################################################
 // Update VN to CN message array [Includes Multi Codeword Processing]
@@ -62,6 +63,31 @@ __global__ void DataPassGB(int *VtoC, int *CtoV, int *Receivedword, int *Interle
 
 //##################################################################################################
 // Update the CN to VN message array [Includes Multi Codeword Processing]
+// Naive implemenation
+__global__ void CheckPassGB(int *CtoV,int *VtoC,int M,int NbBranch,int RowDegree, int numWords)
+{
+    int t,numB=0,m,signe;
+    // Calc relative global memory index where m spans multiple concatenated message arrays
+    m = threadIdx.x + blockIdx.x*blockDim.x;
+    // Calculate strided position for message arrays
+    numB = (RowDegree * m) % NbBranch;
+    // Find CW offset in concatenated array 
+    int CW_offset = (m / M) * NbBranch;
+
+    // Conditional is boundary check
+    if (m < M*numWords) {
+        signe=0;
+        for (t=0;t<RowDegree;t++) {
+            signe^=VtoC[numB+t + CW_offset];
+        }
+        for (t=0;t<RowDegree;t++) {     
+            CtoV[numB+t + CW_offset]=signe^VtoC[numB+t + CW_offset];
+        }
+    }
+}
+
+// Faux memory access simulation
+/*
 __global__ void CheckPassGB(int *CtoV,int *VtoC,int M,int NbBranch,int RowDegree, int numWords)
 {
     int t,numB=0,m,signe;
@@ -71,34 +97,66 @@ __global__ void CheckPassGB(int *CtoV,int *VtoC,int M,int NbBranch,int RowDegree
     numB = (RowDegree * m) % NbBranch;
     // Find which CW in concatenated array the thread is associated and calculate the offset for the concatenated array
     int CW_offset = (m / M) * NbBranch;
-
+    int offset2 = m % M;
 
     // Conditional is boundary check
     if (m < M*numWords) {
         signe=0;
         for (t=0;t<RowDegree;t++) {
-            signe^=VtoC[numB+t + CW_offset];
-            
+            //signe^=VtoC[numB+t + CW_offset];
+            signe^=VtoC[offset2 + t*M + CW_offset];
 
         }
 
-        for (t=0;t<RowDegree;t++) {
-            
-            
-            CtoV[numB+t + CW_offset]=signe^VtoC[numB+t + CW_offset];
-            //if (m > M)
-            //  printf("Sample CtoV data = %d at global position %d \n",CtoV[numB+t + CW_offset],numB+t + CW_offset);
-
+        for (t=0;t<RowDegree;t++) {     
+            //CtoV[numB+t + CW_offset]=signe^VtoC[numB+t + CW_offset];
+            CtoV[offset2 + t*M + CW_offset]=signe^VtoC[offset2 + t*M + CW_offset];
         }
-
-        
-            // DEBUG CODE
-           // if (m > M)
-            //  printf("Sample CtoV data = %d \n",CtoV[CW_offset + m]);
-
-                        
+            
     }
 }
+*/
+
+// Reduction based implemenation
+/*
+__global__ void CheckPassGB(int *CtoV,int *VtoC,int M,int NbBranch,int RowDegree, int numWords)
+{
+    // Calc relative global memory index where m spans multiple concatenated message arrays for multiple words
+    int m = threadIdx.x + blockIdx.x*blockDim.x;
+    int tid = threadIdx.x;
+
+    // shared memory declaration for a copy of the VtoC message array (blocksize*row degree)
+    __shared__ int sh_VtoC[128];
+    // shared memory declaration for signe (blocksize* 1/2 * row degree)
+    __shared__ int sh_signe[128];
+
+    // Conditional is boundary check
+    if (m < NbBranch*numWords) {
+
+        // pull in from global to shared memory and sync threads before subsequent computations occur
+        sh_VtoC[tid] = VtoC[m];
+        __syncthreads();
+        // make copy and sync threads
+        sh_signe[tid] = sh_VtoC[tid];
+        __syncthreads();
+
+        // Reduction to single signe value for each CN
+        // Reduction loop set up to limit thread control divergence
+        for (int boundary = blockDim.x; boundary > blockDim.x/RowDegree; boundary = boundary/2) {
+            if (tid < boundary/2) {
+                int tmp = sh_signe[tid*2] ^ sh_signe[tid*2 + 1];
+                __syncthreads();
+                sh_signe[tid] = tmp;
+                __syncthreads();
+            }
+        }
+        // Sync threads before writing to global memory then construct
+        __syncthreads();
+        CtoV[m] = sh_signe[tid / RowDegree] ^ sh_VtoC[tid];
+    
+    }
+}
+*/
 
 //#####################################################################################################
 //  Update the VN's [Includes Multi Codeword Processing]
@@ -124,10 +182,6 @@ __global__ void APP_GB(int *Decide,int *CtoV,int *Receivedword,int *Interleaver,
 
 		for (t=0;t<ColumnDegree;t++) 
             Global+=(-2)*CtoV[Interleaver[numB+t] + CW_offset]+1;
-
-            // DEBUG CODE
-            //if (n > N)
-             //   printf("Global value 2nd loc = %d \n",Global);
 
 
         if(Global>0) 
@@ -174,6 +228,7 @@ __global__ void ComputeSyndrome(int *Decide,int *Mat,int *RowDegree,int M, int *
 */
 
 // This is a temp kernel w/o optimzation in mind
+/*
 __global__ void ComputeSyndrome(int *Decide,int *Mat,int RowDegree,int M, int *Dev_Syndrome, int numWords)
 {
 	int Synd,k,l,i;
@@ -196,6 +251,55 @@ __global__ void ComputeSyndrome(int *Decide,int *Mat,int RowDegree,int M, int *D
 
     // Update Syndrome tracker array; each entry in array is assigned to single CW syndrome result
     Dev_Syndrome[threadIdx.x] = 1-Synd;
+}
+*/
 
+// This kernel is for multiple codeword 
+__global__ void ComputeSyndrome(int *Decide,int *Mat,int RowDegree,int M,
+                                           int *Dev_Syndrome, int numWords)
+{
+	int Synd = 0,k,l;
+    //Shared memory to utilize reduction operation  
+    __shared__ int sh_Synd[512];
+    //Pointer to hold the starting point of Decide array of operating codeword
+    //int *Decide_skid;
+
+     //Global thread Index. Shall be in the range of 0 to num_codeword * 2048
+     int n = threadIdx.x + blockIdx.x*blockDim.x;
+     //Thread Index at thread block level 
+     int thd_id = threadIdx.x;
+    
+     //Initialize tshared memory to 0 and wait for all threads to complete 
+     sh_Synd[thd_id] = 0; __syncthreads();
+   
+     int cw_operated = n/1024; //Find the CW on which thd block is operating 
+
+     //Initialize the Global memory Dev_Syndrome to 1 for each codeword 
+     if(n %1024 == 0 ) Dev_Syndrome[cw_operated] = 1; __syncthreads();
+          
+         
+     int idx = (n %1024); //Find the bit location on the operating codeword 
+     int vld_idx = idx < M; //Qual to check the thd is in H Mat Row range[0-647]
+
+     //Find the Decide location for the operating codeword 
+     __syncthreads();
+   
+     //Check bit level syndrome     
+     //if (vld_idx) {
+    	 for (l=0;l<RowDegree;l++)Synd=Synd^Decide[Mat[idx*8 + l] + (cw_operated * 1296) ];    
+     	 if (vld_idx) sh_Synd[thd_id] = Synd; 
+     //}
+     __syncthreads();
+     
+    //Reduce to a single value 
+    for(int stride = blockDim.x/2 ; stride > 0; stride = stride/2) {
+     sh_Synd[thd_id] = sh_Synd[thd_id] | sh_Synd[thd_id + stride];
+     __syncthreads();
+     } 
+     //Write back to Global memory
+     if (thd_id == 0 ) atomicMin(&Dev_Syndrome[cw_operated],(1 - sh_Synd[0])); 
+     // if (vld_idx ) atomicMin(Dev_Syndrome+ (cw_operated << 2),(1 - sh_Synd[thd_id]));
+     // printf ("\n %x",  Dev_Syndrome+ (cw_operated << 2));
+     __syncthreads();
 
 }

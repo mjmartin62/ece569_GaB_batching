@@ -1,22 +1,20 @@
 #!/bin/bash
 
-
-### Specify "wallclock time", hhh:mm:ss. Required field
-#SBATCH --time 00:03:00
-
-### set directory for job execution, replace the following path with your own path
-bin_path=~matthewmartin/ece569/proj/
-
-### Run script from the path above using the following command line format
-###./bin/main ~/ece569/proj/source/GaB/IRISC_dv4_R050_L54_N1296_Dform IRISC_dv4_R050_L54_N1296_Dform_Res_cu 1 32 0 0
-###
-
-
+###  Runs nested loops for multiple CUDA configurations
+# i = number of CUDA STREAMS
+# j = BLOCK SIZE
+# k = number of words per CUDA STREAM
 
 ### run sweep
-for i in {0..10..2}
+for i in {5,20,35}
 do
-  time ./main ~/ece569/proj/source/GaB/IRISC_dv4_R050_L54_N1296_Dform IRISC_dv4_R050_L54_N1296_Dform_Res_cu $i
+    for j in {32,128,512,1024}
+    do
+        for k in {5,20,35}
+        do
+            ./bin/main ~/ece569/proj/source/GaB/IRISC_dv4_R050_L54_N1296_Dform IRISC_dv4_R050_L54_N1296_Dform_Res_cu $i $j $k 0
+        done
+    done
 done
 
 
